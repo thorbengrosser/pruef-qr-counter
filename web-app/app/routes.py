@@ -107,13 +107,10 @@ def datenschutz():
 
 @bp.route("/api/count")
 def api_count():
-    """ESP32-compatible: Cache-Control: no-store, minimal JSON. Never 304."""
+    """ESP32-compatible: Cache-Control: no-store, minimal JSON."""
     data = get_count()
     resp = jsonify(data)
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    resp.etag = False  # Werkzeug: disable ETag entirely, prevents 304
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
