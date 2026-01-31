@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Prüfstelle — PRÜF QR{% endblock %}
+{% block content %}
+  <div class="start-screen">
+    <p class="eingang-timestamp" id="eingang-timestamp" aria-hidden="true">EINGANG: —</p>
+    <h1>Vorgang eingeleitet. Die Überprüfung der verfassungsmäßigen Unbedenklichkeit des vorliegenden QR-Codes wurde initiiert.</h1>
+    <p class="lede">Bitte reichen Sie den entsprechenden Antrag zur weiteren Bearbeitung ein.</p>
+    <div class="actions">
+      <a href="{{ url_for('main.form') }}" class="btn primary">Antrag einreichen</a>
+    </div>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function () {
+      var el = document.getElementById('eingang-timestamp');
+      if (!el) return;
+      var now = new Date();
+      var date = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      var time = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
+      el.textContent = 'EINGANG: ' + date + ' | ' + time;
+    })();
+  </script>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Widerspruch — PRÜF QR{% endblock %}
+{% block content %}
+  <h1>Widerspruch eingegangen.</h1>
+  <p class="lede">Wir prüfen erneut. Gründlicher. Wirklich.</p>
+  <div class="result">
+    <p class="result-line">✅ QR-Code erneut geprüft.</p>
+    <p class="result-line">✅ Immer noch verfassungskonform.</p>
+    <p class="result-line no">❌ Gesichert rechtsextreme Parteien: immer noch nicht automatisch geprüft.</p>
+  </div>
+  <div class="actions">
+    <a href="{{ url_for('main.info') }}" class="btn primary">Was nun?</a>
+  </div>
+{% endblock %}

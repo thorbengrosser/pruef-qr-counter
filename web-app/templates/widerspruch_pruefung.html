@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Widerspruch wird geprüft — PRÜF QR{% endblock %}
+{% block content %}
+  <div class="chip">Widerspruch eingegangen</div>
+  <p class="lede">Wir prüfen erneut. Gründlicher. Wirklich.</p>
+  <div class="status-with-spinner">
+    <div class="spinner-amtlich" aria-hidden="true"></div>
+    <p id="recheck-msg" class="status-line lede"><strong>Widerspruch wird registriert…</strong></p>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function () {
+      var msgs = [
+        'Widerspruch wird registriert…',
+        'Prüfung wird wiederholt…',
+        'Gründlichkeit wird erhöht…',
+        'Ergebnis wird erneut protokolliert…'
+      ];
+      var el = document.getElementById('recheck-msg');
+      var i = 0;
+      var minDisplayMs = 1600;
+      var start = Date.now();
+      function tick() {
+        var elapsed = Date.now() - start;
+        if (elapsed >= minDisplayMs) {
+          window.location.href = '/widerspruch';
+          return;
+        }
+        el.innerHTML = '<strong>' + msgs[i] + '</strong>';
+        i = (i + 1) % msgs.length;
+        setTimeout(tick, 450);
+      }
+      el.innerHTML = '<strong>' + msgs[0] + '</strong>';
+      setTimeout(tick, 450);
+    })();
+  </script>
+{% endblock %}

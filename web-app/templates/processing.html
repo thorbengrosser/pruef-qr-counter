@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Bearbeitung — PRÜF QR{% endblock %}
+{% block content %}
+  <div class="chip">Vorgang: PRÜF-QR-2026-XXXX</div>
+  <p class="lede">Bitte bleiben Sie in der Leitung. Sie sind bereits verbunden.</p>
+  <div class="paper-workflow">
+    <div class="workflow-sheet workflow-sheet--scan" id="workflow-sheet">
+      <p id="rotating-msg" class="workflow-status"><strong>Zuständigkeiten werden im Unterkomitee debattiert...</strong></p>
+    </div>
+    <p class="workflow-hint workflow-hint-below">Vorgang wird bearbeitet.</p>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function () {
+      var msgs = [
+        'Zuständigkeiten werden im Unterkomitee debattiert...',
+        'Prüfsiegel-Tinte wird vorschriftsmäßig angerührt...',
+        'Bedenkenträger werden präventiv konsultiert...',
+        'Formularvollständigkeit wird akribisch verifiziert...',
+        'Dienstweg wird auf Hindernisse untersucht...',
+        'Referenzwerte werden mit dem Zentralregister abgeglichen...'
+      ];
+      var sheet = document.getElementById('workflow-sheet');
+      var el = document.getElementById('rotating-msg');
+      var i = 0;
+      var minDisplayMs = 3500;
+      var start = Date.now();
+      function tick() {
+        var elapsed = Date.now() - start;
+        if (elapsed >= minDisplayMs) {
+          window.location.href = '/bescheid';
+          return;
+        }
+        sheet.classList.add('workflow-sheet--transition');
+        setTimeout(function () {
+          el.innerHTML = '<strong>' + msgs[i] + '</strong>';
+          i = (i + 1) % msgs.length;
+          sheet.classList.remove('workflow-sheet--transition');
+        }, 220);
+        setTimeout(tick, 700);
+      }
+      setTimeout(tick, 700);
+    })();
+  </script>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Datenschutz — PRÜF QR{% endblock %}
+{% block content %}
+  <article class="legal-document">
+    <p class="legal-protokoll">VORGANG: Eigenständige Prüfung der Datenverarbeitungsprozesse durch den Nutzer.</p>
+    <h1>DATENSCHUTZERKLÄRUNG</h1>
+
+    <p class="legal-lede">Sie haben sich dazu entschieden, diesen Text zu lesen. Ein korrektes und ordnungsliebendes Verhalten, das wir ausdrücklich begrüßen. Sogar diese DSE wurde häufiger geprüft als vom Verfassungsschutz als gesichert Rechtsextrem angesehene Dateien. Gemäß den Grundsätzen der Transparenz (Art.&nbsp;12&nbsp;ff. DSGVO) legen wir hiermit offen, wie wir Daten innerhalb dieses Systems verarbeiten.</p>
+
+    <h2>1. Vorbemerkung zur Zuständigkeit</h2>
+    <p><strong>Wichtiger Hinweis:</strong> Dieses Web-Angebot ist ein privates Projekt zur Unterstützung der Kampagne PRÜF. Es handelt sich ausdrücklich <strong>nicht</strong> um ein offizielles Angebot der Organisatoren der PRÜF-Demos.</p>
+
+    <h2>2. Verantwortlicher (Art. 4 Nr. 7 DSGVO)</h2>
+    <p>Verantwortlich für die Datenverarbeitung im Sinne der Grundverordnung ist:</p>
+    <p><strong>Thorben Grosser</strong><br>
+    Lange Str. 22<br>
+    20359 Hamburg<br>
+    E-Mail: <a href="mailto:thorben@thorben.co">thorben@thorben.co</a></p>
+
+    <h2>3. Protokollierung der Datensparsamkeit</h2>
+    <p>Dieses System wurde nach dem Prinzip der „Datenschutz-Durchsetzung“ entwickelt.</p>
+    <ul>
+      <li><strong>Keine Cookies:</strong> Es werden keine Cookies gesetzt. Eine Prüfung auf Cookie-Einwilligung (Banner) entfällt daher mangels Relevanz.</li>
+      <li><strong>Keine Drittanbieter:</strong> Wir binden keine Skripte, Schriftarten oder Tracker externer Firmen ein.</li>
+    </ul>
+
+    <h2>4. Verarbeitungsprozess bei „Antrag faxen“</h2>
+    <p>Nur wenn Sie den Button „Antrag faxen“ aktiv betätigen, wird ein Datensatz erzeugt. Dabei gilt:</p>
+    <ul>
+      <li><strong>Pseudonymisierung:</strong> Ihre IP-Adresse wird mittels <strong>HMAC-SHA256</strong> und einem geheimen Serverschlüssel in eine anonymisierte Zeichenfolge umgewandelt.</li>
+      <li><strong>Speicherung:</strong> Wir speichern lediglich diesen Hash, den Zeitstempel und den Aktionstyp.</li>
+      <li><strong>Löschfristen:</strong> Nach einem Zeitraum von <strong>90 Tagen</strong> wird der Vorgang automatisch aus der Datenbank entfernt.</li>
+    </ul>
+
+    <h2>5. Hosting & Infrastruktur</h2>
+    <p>Die Anwendung wird als Docker-Container auf einem virtuellen Server (VPS) der <strong>Hetzner Online GmbH</strong> (Deutschland) betrieben. Ein Vertrag zur Auftragsverarbeitung gemäß Art.&nbsp;28 DSGVO liegt vor.</p>
+  </article>
+{% endblock %}

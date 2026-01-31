@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Antrag — PRÜF QR{% endblock %}
+{% block content %}
+  <h1>Antrag auf QR-Code-Prüfung</h1>
+  <p class="lede">Bitte vollständig ausfüllen (haben wir bereits für Sie erledigt).</p>
+
+  <div class="counter">
+    <div class="counter-label">Zählwerk / Einheit: Prüfungen</div>
+    <div class="k">Eingegangene Anträge:</div>
+    <div class="counter-display">
+      <div class="n" id="counter-value" aria-live="polite">0000</div>
+    </div>
+  </div>
+
+  <div class="form">
+    <div class="row"><span class="k">Antragsteller*in</span><span class="v">Bürger*in (m/w/d)</span></div>
+    <div class="row"><span class="k">Anliegen</span><span class="v">Prüfung eines QR-Codes</span></div>
+    <div class="row"><span class="k">Begründung</span><span class="v">Weil alles Ordnung haben muss</span></div>
+  </div>
+
+  <div id="err-msg" class="err-msg" style="display: none;" role="alert"></div>
+
+  <div class="actions">
+    <button type="button" id="btn-fax" class="btn primary">Antrag faxen</button>
+  </div>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function () {
+      var counterEl = document.getElementById('counter-value');
+      var btn = document.getElementById('btn-fax');
+      var errEl = document.getElementById('err-msg');
+
+      function formatCount(n) {
+        if (typeof n !== 'number' || n < 0) return '0000';
+        return String(Math.min(9999, n)).padStart(4, '0');
+      }
+
+      function fetchCount() {
+        fetch('/api/count')
+          .then(function (r) { return r.json(); })
+          .then(function (d) { counterEl.textContent = formatCount(d.count); })
+          .catch(function () { counterEl.textContent = '0000'; });
+      }
+
+      function showError(msg) {
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+      }
+      function hideError() {
+        errEl.style.display = 'none';
+      }
+
+      fetchCount();
+      setInterval(fetchCount, 5000);
+
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        hideError();
+        btn.disabled = true;
+
+        fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+          .then(function (r) {
+            return r.json().then(function (d) { return { status: r.status, data: d }; });
+          })
+          .then(function (res) {
+            if (res.status === 200) {
+              window.location.href = '/processing';
+              return;
+            }
+            if (res.status === 429) {
+              showError('Prüfung pausiert. Ihre Prüfdichte überschreitet den empfohlenen Grenzwert. Bitte prüfen Sie später weiter.');
+              btn.disabled = false;
+              return;
+            }
+            showError('Fax fehlgeschlagen. Erneut faxen.');
+            btn.disabled = false;
+          })
+          .catch(function () {
+            showError('Fax fehlgeschlagen. Erneut faxen.');
+            btn.disabled = false;
+          });
+      });
+    })();
+  </script>
+{% endblock %}
