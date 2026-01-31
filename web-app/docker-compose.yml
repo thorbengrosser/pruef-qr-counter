@@ -1,0 +1,19 @@
+services:
+  pruef-qr:
+    build: .
+    ports:
+      - "5050:5000"
+    volumes:
+      - pruef-data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/healthz')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pruef-data:
