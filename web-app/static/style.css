@@ -13,6 +13,9 @@
   --shadow-green: #737151;
   --paper-white: #D9D9D9;
   --pure-black: #0D0D0D;
+  /* Aktenmarker-Orange: global primary CTA (Weiter / progression) */
+  --aktenmarker-orange: #C46A2B;
+  --aktenmarker-orange-hover: #a85a24;
   /* Queue-management-display red (dull red on black-ish, LED-style) */
   --display-red: #B03030;
   --line: rgba(13, 13, 13, 0.22);
@@ -311,8 +314,9 @@ h1, h2 {
   font-size: 1rem;
 }
 
+/* Global primary CTA: Aktenmarker-Orange (Weiter / progression on all screens) */
 .btn.primary {
-  background: var(--deep-green);
+  background: var(--aktenmarker-orange);
   color: var(--paper-white);
   border: 1px solid rgba(13, 13, 13, 0.35);
   box-shadow: 3px 3px 0 rgba(13, 13, 13, 0.55);
@@ -320,9 +324,14 @@ h1, h2 {
 }
 
 .btn.primary:hover {
-  background: var(--pure-black);
+  background: var(--aktenmarker-orange-hover);
   transform: translate(-2px, -2px);
-  box-shadow: 5px 5px 0 var(--shadow-green);
+  box-shadow: 5px 5px 0 rgba(13, 13, 13, 0.6);
+}
+
+.btn.primary:active {
+  transform: translate(0, 0);
+  box-shadow: 2px 2px 0 rgba(13, 13, 13, 0.5);
 }
 
 .btn.primary:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
@@ -348,6 +357,29 @@ h1, h2 {
   padding: 10px 12px;
   font-size: 12px;
   box-shadow: 2px 2px 0 rgba(13,13,13,0.35);
+}
+
+/* Secondary re-check button (final screen): smaller, neutral, real button */
+.btn.recheck {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(13, 13, 13, 0.3);
+  color: rgba(13, 13, 13, 0.85);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 1px 1px 0 rgba(13, 13, 13, 0.25);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+.btn.recheck:hover {
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 2px 2px 0 rgba(13, 13, 13, 0.3);
+  transform: translate(-1px, -1px);
+}
+
+.btn.recheck:active {
+  transform: translate(0, 0);
+  box-shadow: 1px 1px 0 rgba(13, 13, 13, 0.2);
 }
 
 .bescheid-head .title { font-family: var(--sans); font-weight: 900; letter-spacing: 0.18em; }
@@ -609,17 +641,20 @@ h1, h2 {
   opacity: 0.9;
 }
 
+/* Was nun?: only the progression CTA (Zu PRÜF) uses orange when .primary is added */
+.info-links .btn.primary.cta-pruef,
 .info-links .btn.cta-pruef {
-  background: var(--deep-green);
+  background: var(--aktenmarker-orange);
   color: var(--paper-white);
   border: 1px solid rgba(13, 13, 13, 0.35);
   box-shadow: 3px 3px 0 rgba(13, 13, 13, 0.55);
 }
 
+.info-links .btn.primary.cta-pruef:hover,
 .info-links .btn.cta-pruef:hover {
-  background: var(--pure-black);
+  background: var(--aktenmarker-orange-hover);
   transform: translate(-2px, -2px);
-  box-shadow: 5px 5px 0 var(--shadow-green);
+  box-shadow: 5px 5px 0 rgba(13, 13, 13, 0.6);
 }
 
 .info-links .btn.cta-spenden {
