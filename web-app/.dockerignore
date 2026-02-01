@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.venv/
+venv/
+data/
+*.db
+.idea/
+.vscode/
+.DS_Store

@@ -32,3 +32,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Other
+testing/

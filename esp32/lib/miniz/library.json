@@ -1,0 +1,9 @@
+{
+  "name": "miniz",
+  "version": "2.2.0",
+  "description": "Single C source file zlib-replacement compression library",
+  "build": {
+    "flags": ["-DMINIZ_NO_ARCHIVE_APIS", "-DMINIZ_NO_ARCHIVE_WRITING_APIS", "-DMINIZ_NO_STDIO", "-DMINIZ_NO_TIME"]
+  },
+  "srcFilter": ["+<*.c>"]
+}
