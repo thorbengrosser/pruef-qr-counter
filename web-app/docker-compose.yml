@@ -1,3 +1,7 @@
+# Fixed project name so the volume is always "pruef-qr_pruef-data" no matter
+# where you run from (e.g. cd web-app vs docker compose -f web-app/docker-compose.yml).
+name: pruef-qr
+
 services:
   pruef-qr:
     build: .
