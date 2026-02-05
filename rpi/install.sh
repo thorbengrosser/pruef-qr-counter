@@ -20,6 +20,7 @@ apt-get install -y \
   libdbus-1-dev \
   libglib2.0-dev \
   libcairo2-dev \
+  libopenjp2-7 \
   hostapd \
   dnsmasq \
   avahi-daemon \

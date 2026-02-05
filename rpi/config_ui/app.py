@@ -386,7 +386,8 @@ def get_wifi_status() -> dict:
         )
         if result.returncode == 0:
             lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
-            wifi_conns = [l for l in lines if ":wifi:" in l.lower()]
+            # nmcli reports WiFi as type "802-11-wireless", not "wifi"
+            wifi_conns = [l for l in lines if ":wifi:" in l.lower() or ":802-11-wireless:" in l.lower()]
             if wifi_conns:
                 parts = wifi_conns[0].split(":")
                 return {"connected": True, "ssid": parts[0] if len(parts) > 0 else "unknown", "state": parts[-1] if len(parts) > 0 else "unknown"}
