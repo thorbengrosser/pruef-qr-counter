@@ -22,6 +22,7 @@ try:
     from bleak import BleakScanner
 except ImportError as e:
     print("Missing dependencies: pip install -r requirements.txt", file=sys.stderr)
+    print(f"ImportError: {e}", file=sys.stderr)
     sys.exit(1)
 
 DISPLAY_SLOT = 1
