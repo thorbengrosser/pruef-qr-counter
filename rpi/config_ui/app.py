@@ -93,7 +93,7 @@ def list_fonts() -> list[str]:
 def restart_display_service() -> bool:
     try:
         subprocess.run(
-            ["systemctl", "--user", "restart", "pruf-display.service"],
+            ["systemctl", "restart", "pruf-display.service"],
             timeout=5,
             capture_output=True,
         )
@@ -357,14 +357,14 @@ def get_service_status(service_name: str) -> dict:
     """Check systemd service status. Returns {active: bool, status: str}."""
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "is-active", service_name],
+            ["systemctl", "is-active", service_name],
             capture_output=True,
             text=True,
             timeout=2,
         )
         active = result.returncode == 0
         status_result = subprocess.run(
-            ["systemctl", "--user", "status", service_name, "--no-pager", "-n", "5"],
+            ["systemctl", "status", service_name, "--no-pager", "-n", "5"],
             capture_output=True,
             text=True,
             timeout=2,
