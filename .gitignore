@@ -39,4 +39,9 @@ Thumbs.db
 .piolibdeps/
 
 # Other
-testing/
+#testing/
+
+# RPi runtime
+rpi/status.json
+rpi/venv/
+rpi/preview/

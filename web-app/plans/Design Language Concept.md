@@ -25,6 +25,9 @@ And only then, in small doses:
 The humour never shouts.  
 It emerges from **excessive correctness**.
 
+It is very important that the page is Mobile First, it will be 99% accessed by mobile users.
+We should make this as accessible as possible without overdoing it.
+
 ---
 
 ## 2. Emotional Target
