@@ -81,6 +81,30 @@ You can run the config UI and test basic behaviour on your laptop/desktop withou
 
 - Join the Pi to your phone’s hotspot (set primary WiFi to the hotspot SSID/password, or connect once via PRUF-Setup and set it there). Then open **http://pruf.local** or the IP your hotspot gave the Pi to access the same config UI.
 
+## Updating the Pi (git pull)
+
+`rpi/config.json` is in `.gitignore` (it contains WiFi passwords), but on an existing Pi it may still be *tracked*. When you run `git pull`, Git may refuse with: *"Your local changes to the following files would be overwritten by merge: rpi/config.json"*.
+
+**One-time fix** (stash your config, pull, restore):
+
+```bash
+cd ~/pruef_counter
+git stash push -m "pi config" rpi/config.json
+git pull
+git stash pop
+```
+
+**Permanent fix** (so `git pull` never overwrites your local config):
+
+On the Pi, run once:
+
+```bash
+cd ~/pruef_counter
+git update-index --skip-worktree rpi/config.json
+```
+
+After that, `git pull` will always keep your local `rpi/config.json`. To undo later: `git update-index --no-skip-worktree rpi/config.json`.
+
 ## Project layout
 
 - `README.md` — This file

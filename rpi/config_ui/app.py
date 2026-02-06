@@ -47,23 +47,33 @@ app = Flask(__name__)
 
 
 def load_config() -> dict:
-    if os.path.isfile(CONFIG_PATH):
+    """Load config from JSON. Returns DEFAULTS if file missing or invalid (e.g. empty/corrupt)."""
+    if not os.path.isfile(CONFIG_PATH):
+        return DEFAULTS.copy()
+    try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            raw = f.read().strip()
+            if not raw:
+                return DEFAULTS.copy()
+            data = json.loads(raw)
             return {**DEFAULTS, **data}
-    return DEFAULTS.copy()
+    except (json.JSONDecodeError, OSError):
+        return DEFAULTS.copy()
 
 
 def load_status() -> dict:
     """Read status.json from display daemon (last_error, last_count, api_ok)."""
     status_path = os.path.join(RPI_DIR, "status.json")
-    if os.path.isfile(status_path):
-        try:
-            with open(status_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    if not os.path.isfile(status_path):
+        return {}
+    try:
+        with open(status_path, "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+            if not raw:
+                return {}
+            return json.loads(raw)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 def save_config(data: dict) -> None:

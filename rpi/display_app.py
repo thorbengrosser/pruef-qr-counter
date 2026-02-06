@@ -565,7 +565,15 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
     if config_path is None:
         config_path = os.environ.get("CONFIG_PATH") or os.path.join(get_rpi_dir(), "config.json")
 
-    cfg = load_config(config_path)
+    try:
+        cfg = load_config(config_path)
+    except FileNotFoundError:
+        log.error("Config not found: %s", config_path)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        log.error("Invalid config.json (bad JSON): %s", e)
+        sys.exit(1)
+
     dcfg = DisplayConfig(cfg)
     config_mtime = os.path.getmtime(config_path)
 
