@@ -27,6 +27,15 @@ apt-get install -y \
   network-manager \
   --no-install-recommends
 
+# Ensure Bluetooth is on (required for BLE / iPixel display)
+echo "Enabling Bluetooth (required for BLE display)..."
+apt-get install -y bluez --no-install-recommends 2>/dev/null || true
+systemctl enable bluetooth 2>/dev/null || true
+rfkill unblock bluetooth 2>/dev/null || true
+systemctl start bluetooth 2>/dev/null || true
+sleep 3
+( bluetoothctl power on 2>/dev/null || true )
+
 # Ensure NetworkManager is used for WiFi (disable dhcpcd on interface if conflicting)
 if command -v nmcli &>/dev/null; then
   echo "NetworkManager available."
@@ -35,6 +44,16 @@ if command -v nmcli &>/dev/null; then
     echo "Note: dhcpcd.conf mentions wlan0. NetworkManager should take over, but if WiFi fails, check for conflicts."
   fi
 fi
+
+# Configure fallback DNS (Quad9 non-profit + Cloudflare) so DNS works even on flaky hotspots
+echo "Configuring fallback DNS (Quad9 9.9.9.9, Cloudflare 1.1.1.1)..."
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/dns-fallback.conf << 'DNSEOF'
+[global-dns-domain-*]
+servers=9.9.9.9,1.1.1.1
+DNSEOF
+# Reload NM to pick up DNS config
+systemctl reload NetworkManager 2>/dev/null || true
 
 echo "Creating virtualenv and installing Python deps..."
 if [ ! -d "$RPI_DIR/venv" ]; then
@@ -58,14 +77,16 @@ cat > /etc/systemd/system/$DISPLAY_SERVICE << EOF
 [Unit]
 Description=PRÜF Counter display daemon (iPixel BLE)
 After=network-online.target bluetooth.target
-Wants=network-online.target
+Wants=network-online.target bluetooth.target
 
 [Service]
 Type=simple
 WorkingDirectory=$RPI_DIR
+ExecStartPre=/usr/sbin/rfkill unblock bluetooth
+ExecStartPre=/bin/sleep 1
 ExecStart=$RPI_DIR/venv/bin/python $RPI_DIR/display_app.py
-Restart=on-failure
-RestartSec=10
+Restart=always
+RestartSec=3
 User=root
 Group=root
 
@@ -84,8 +105,8 @@ Type=simple
 WorkingDirectory=$RPI_DIR
 Environment=CONFIG_UI_PORT=80
 ExecStart=$RPI_DIR/venv/bin/python -m config_ui.app
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=3
 User=root
 Group=root
 
@@ -104,8 +125,8 @@ Before=$DISPLAY_SERVICE
 Type=simple
 WorkingDirectory=$RPI_DIR
 ExecStart=$RPI_DIR/network/network_state.sh
-Restart=on-failure
-RestartSec=15
+Restart=always
+RestartSec=5
 User=root
 Group=root
 
@@ -118,36 +139,10 @@ systemctl enable $DISPLAY_SERVICE
 systemctl enable $CONFIG_SERVICE
 systemctl enable pruf-network.service
 
-# Ensure config exists
+# Ensure config exists (copy from example template if missing)
 if [ ! -f "$RPI_DIR/config.json" ]; then
-  echo "Creating default config.json..."
-  cat > "$RPI_DIR/config.json" << 'CONFIGEOF'
-{
-  "wifi_ssid": "",
-  "wifi_pass": "",
-  "wifi_ssid2": "",
-  "wifi_pass2": "",
-  "api_url": "https://pruef.st/api/count",
-  "poll_interval_sec": 1.0,
-  "display_string": "",
-  "suffix": " x",
-  "font": "Kario39C3Var-Roman.ttf",
-  "font_size": 22,
-  "font_width": 100,
-  "y_offset": 1,
-  "crisp": true,
-  "text_color": "ffffff",
-  "bg_color": "000000",
-  "effect": "invert",
-  "flash_duration_sec": 0.15,
-  "flash_repeat": 3,
-  "flash_text_color": "000000",
-  "flash_bg_color": "ffffff",
-  "flash_color": "ffffff",
-  "flash_color2": "",
-  "devices": "auto"
-}
-CONFIGEOF
+  echo "Creating default config.json from config.json.example..."
+  cp "$RPI_DIR/config.json.example" "$RPI_DIR/config.json"
 fi
 
 # Set hostname for mDNS (pruf.local)

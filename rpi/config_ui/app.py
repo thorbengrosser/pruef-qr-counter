@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 import io
 from flask import Flask, request, redirect, url_for, render_template_string, Response, jsonify
@@ -21,7 +22,7 @@ DEFAULTS = {
     "wifi_pass": "",
     "wifi_ssid2": "",
     "wifi_pass2": "",
-    "api_url": "https://pruef.st/api/count",
+    "api_url": "https://pruef.st/api/count",  # HTTPS preferred; auto-upgraded for pruef.st
     "poll_interval_sec": 1.0,
     "display_string": "",
     "suffix": " x",
@@ -127,6 +128,18 @@ def try_connect_sta() -> bool:
         except Exception:
             pass
     return False
+
+
+def _async_reconnect() -> None:
+    """Run WiFi reconnect + display restart in background thread."""
+    try:
+        try_connect_sta()
+    except Exception:
+        pass
+    try:
+        restart_display_service()
+    except Exception:
+        pass
 
 
 def _norm_hex(s: str) -> str:
@@ -353,8 +366,43 @@ def preview():
         return Response(str(e), status=400, mimetype="text/plain")
 
 
+_service_cache: dict = {}  # {name: (timestamp, result)}
+_SERVICE_CACHE_TTL = 5.0   # seconds
+
+
 def get_service_status(service_name: str) -> dict:
-    """Check systemd service status. Returns {active: bool, status: str}."""
+    """Check systemd service status with caching. Returns {active: bool, status: str}."""
+    import time as _time
+    now = _time.monotonic()
+    cached = _service_cache.get(service_name)
+    if cached and (now - cached[0]) < _SERVICE_CACHE_TTL:
+        return cached[1]
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", service_name],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        active = result.returncode == 0
+        # Only fetch full status text if explicitly needed (status page)
+        # For /status.json keep it lightweight
+        status_text = "active" if active else "inactive"
+        data = {"active": active, "status": status_text}
+        _service_cache[service_name] = (now, data)
+        return data
+    except Exception:
+        return {"active": False, "status": "unknown"}
+
+
+def get_service_status_full(service_name: str) -> dict:
+    """Full systemd status with journal lines. Used for /status HTML page only."""
+    import time as _time
+    cache_key = service_name + ":full"
+    now = _time.monotonic()
+    cached = _service_cache.get(cache_key)
+    if cached and (now - cached[0]) < _SERVICE_CACHE_TTL:
+        return cached[1]
     try:
         result = subprocess.run(
             ["systemctl", "is-active", service_name],
@@ -370,13 +418,23 @@ def get_service_status(service_name: str) -> dict:
             timeout=2,
         )
         status_text = status_result.stdout if status_result.returncode == 0 else status_result.stderr
-        return {"active": active, "status": status_text}
+        data = {"active": active, "status": status_text}
+        _service_cache[cache_key] = (now, data)
+        return data
     except Exception:
         return {"active": False, "status": "unknown"}
 
 
+_wifi_cache: dict = {}  # {"result": ..., "ts": ...}
+_WIFI_CACHE_TTL = 5.0
+
+
 def get_wifi_status() -> dict:
-    """Get WiFi connection status via nmcli."""
+    """Get WiFi connection status via nmcli (cached)."""
+    import time as _time
+    now = _time.monotonic()
+    if _wifi_cache and (now - _wifi_cache.get("ts", 0)) < _WIFI_CACHE_TTL:
+        return _wifi_cache["result"]
     try:
         result = subprocess.run(
             ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE,STATE", "connection", "show", "--active"],
@@ -390,8 +448,12 @@ def get_wifi_status() -> dict:
             wifi_conns = [l for l in lines if ":wifi:" in l.lower() or ":802-11-wireless:" in l.lower()]
             if wifi_conns:
                 parts = wifi_conns[0].split(":")
-                return {"connected": True, "ssid": parts[0] if len(parts) > 0 else "unknown", "state": parts[-1] if len(parts) > 0 else "unknown"}
-        return {"connected": False, "ssid": None, "state": "disconnected"}
+                data = {"connected": True, "ssid": parts[0] if len(parts) > 0 else "unknown", "state": parts[-1] if len(parts) > 0 else "unknown"}
+                _wifi_cache.update({"result": data, "ts": now})
+                return data
+        data = {"connected": False, "ssid": None, "state": "disconnected"}
+        _wifi_cache.update({"result": data, "ts": now})
+        return data
     except Exception:
         return {"connected": False, "ssid": None, "state": "unknown"}
 
@@ -427,9 +489,9 @@ def status_json():
 def status_page():
     """HTML status dashboard."""
     status = load_status()
-    display_service = get_service_status("pruf-display.service")
-    config_service = get_service_status("pruf-config-server.service")
-    network_service = get_service_status("pruf-network.service")
+    display_service = get_service_status_full("pruf-display.service")
+    config_service = get_service_status_full("pruf-config-server.service")
+    network_service = get_service_status_full("pruf-network.service")
     wifi = get_wifi_status()
     
     STATUS_HTML = """
@@ -517,7 +579,7 @@ def status_page():
     <div class="container">
         <h1>PRÜF Counter Status</h1>
         <button class="refresh-btn" onclick="location.reload()">🔄 Refresh</button>
-        <div class="auto-refresh">Auto-refreshes every 10 seconds</div>
+        <div class="auto-refresh">Auto-refreshes every 30 seconds</div>
         
         <div class="card">
             <h2>Display</h2>
@@ -625,8 +687,8 @@ def status_page():
     </div>
     
     <script>
-        // Auto-refresh every 10 seconds
-        setTimeout(() => location.reload(), 10000);
+        // Auto-refresh every 30 seconds
+        setTimeout(() => location.reload(), 30000);
         
         // Format timestamp if needed
         const timestamps = document.querySelectorAll('[data-timestamp]');
@@ -691,15 +753,15 @@ def index():
         }
         try:
             save_config(data)
-            try_connect_sta()
-            restart_display_service()
+            # Reconnect WiFi and restart display in background (don't block HTTP response)
+            threading.Thread(target=_async_reconnect, daemon=True).start()
             return render_template_string(
                 CONFIG_HTML,
                 config=type("C", (), data)(),
                 fonts=list_fonts(),
                 status=load_status(),
                 norm_hex=_norm_hex,
-                message="Saved. Reconnecting…",
+                message="Saved. Reconnecting in background…",
                 error=False,
             )
         except Exception as e:

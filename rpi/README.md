@@ -172,6 +172,7 @@ cat ~/pruef_counter/rpi/status.json
 ## Troubleshooting
 
 - **No BLE devices found**: Ensure iPixel is on and in range; name must start with `LED_BLE_`. Run from command line with `--scan` (see `display_app.py --help`) to list devices.
+- **Bluetooth "No powered adapters" or "Failed to set power on"**: Bluetooth may be soft-blocked. Run `sudo rfkill unblock bluetooth`, then `sudo systemctl restart bluetooth`, wait a few seconds, then `sudo bluetoothctl power on`. If you see "Busy", restart bluetooth and try power on again.
 - **API unreachable**: Check `api_url` in config (full URL to count endpoint). Device will show last value and retry; after repeated failure it will try backup WiFi then start the AP.
 - **Can’t open config page**: In AP mode use **http://192.168.4.1**. When on WiFi/hotspot use **http://pruf.local** (requires mDNS/Avahi) or the Pi’s IP address.
 - **Font not found**: Put **Kario39C3Var-Roman.ttf** (or your font) in `rpi/fonts/` and select it in the config UI, or set `font` in `config.json` to the filename under `fonts/`.

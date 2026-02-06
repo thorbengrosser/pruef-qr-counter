@@ -30,6 +30,9 @@ DEFAULT_DEVICE_PREFIX = "LED_BLE_"
 RECONNECT_COOLDOWN_SEC = 5
 DEFAULT_WIDTH, DEFAULT_HEIGHT = 64, 16
 
+# Use RAM-backed tmpdir for rendered PNGs (avoids SD card writes on every render)
+_TMPDIR = "/dev/shm" if os.path.isdir("/dev/shm") else None
+
 
 def get_rpi_dir() -> str:
     """Directory containing this script (rpi/)."""
@@ -122,12 +125,20 @@ def apply_variable_font_axes(font, *, weight=None, width=None, optical_size=None
         pass
 
 
+def load_font(font_path: str, font_size: int, font_width: float | None = None) -> ImageFont.FreeTypeFont:
+    """Load and configure a font once. Reuse the returned object for rendering."""
+    font = ImageFont.truetype(font_path, min(128, max(6, font_size)))
+    apply_variable_font_axes(font, width=font_width)
+    return font
+
+
 def render_text_to_image(
     text: str,
     width: int,
     height: int,
     *,
-    font_path: str,
+    font: ImageFont.FreeTypeFont | None = None,
+    font_path: str = "",
     font_size: int = 16,
     font_width: float | None = None,
     y_offset: int = 0,
@@ -135,9 +146,10 @@ def render_text_to_image(
     text_color: tuple[int, int, int] = (255, 255, 255),
     bg_color: tuple[int, int, int] = (0, 0, 0),
 ) -> str:
-    """Render text to image. Returns path to temp PNG. font_width: variable font width axis (e.g. 100 for Kario)."""
-    font = ImageFont.truetype(font_path, min(128, max(6, font_size)))
-    apply_variable_font_axes(font, width=font_width)
+    """Render text to image. Returns path to temp PNG.
+    Pass a pre-loaded `font` object for performance; falls back to loading from font_path."""
+    if font is None:
+        font = load_font(font_path, font_size, font_width)
 
     img = Image.new("RGB", (width, height), bg_color)
     draw = ImageDraw.Draw(img)
@@ -147,15 +159,23 @@ def render_text_to_image(
     )
 
     if crisp:
-        pixels = img.load()
-        for y in range(height):
-            for x in range(width):
-                px = pixels[x, y]
-                d_text = sum((a - b) ** 2 for a, b in zip(px, text_color))
-                d_bg = sum((a - b) ** 2 for a, b in zip(px, bg_color))
-                pixels[x, y] = text_color if d_text <= d_bg else bg_color
+        # Fast crisp: threshold each channel using Pillow's point() (C-level, ~10x faster than Python loop)
+        tc = text_color
+        bc = bg_color
+        channels = img.split()
+        result_channels = []
+        for i, ch in enumerate(channels):
+            mid = (tc[i] + bc[i]) / 2.0
+            if tc[i] >= bc[i]:
+                # text is brighter: pixel >= mid → text color, else bg
+                lut = [tc[i] if v >= mid else bc[i] for v in range(256)]
+            else:
+                # text is darker: pixel <= mid → text color, else bg
+                lut = [tc[i] if v <= mid else bc[i] for v in range(256)]
+            result_channels.append(ch.point(lut))
+        img = Image.merge("RGB", result_channels)
 
-    fd, path = tempfile.mkstemp(suffix=".png")
+    fd, path = tempfile.mkstemp(suffix=".png", dir=_TMPDIR)
     os.close(fd)
     img.save(path)
     return path
@@ -163,14 +183,14 @@ def render_text_to_image(
 
 def save_solid_image(width: int, height: int, color: tuple[int, int, int]) -> str:
     img = Image.new("RGB", (width, height), color)
-    fd, path = tempfile.mkstemp(suffix=".png")
+    fd, path = tempfile.mkstemp(suffix=".png", dir=_TMPDIR)
     os.close(fd)
     img.save(path)
     return path
 
 
-async def scan_led_devices(prefix: str = DEFAULT_DEVICE_PREFIX) -> list[tuple[str, str]]:
-    devices = await BleakScanner.discover(timeout=5.0)
+async def scan_led_devices(prefix: str = DEFAULT_DEVICE_PREFIX, timeout: float = 5.0) -> list[tuple[str, str]]:
+    devices = await BleakScanner.discover(timeout=timeout)
     return [
         (d.name or "?", d.address)
         for d in devices
@@ -189,15 +209,33 @@ def resolve_device_addresses(cfg: dict) -> tuple[list[str], bool]:
     return (addrs, False)
 
 
+_last_api_error: str = ""
+_http_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """Reuse a requests.Session for HTTP keep-alive (avoids TCP+TLS handshake every poll)."""
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+    return _http_session
+
+
 def fetch_count(api_url: str) -> int | None:
+    global _last_api_error
     try:
-        r = requests.get(api_url, timeout=5)
+        r = _get_session().get(api_url, timeout=2)
         r.raise_for_status()
-        write_status(last_error=None, api_ok=True)
+        if _last_api_error:
+            print("API recovered.", file=sys.stderr)
+            _last_api_error = ""
         return int(r.json().get("count", 0))
     except Exception as e:
-        write_status(last_error=f"API unreachable: {e}", api_ok=False)
-        print(f"API error: {e}", file=sys.stderr)
+        err_msg = str(e)
+        # Only log when error changes (avoid flooding journal with same DNS error every second)
+        if err_msg != _last_api_error:
+            print(f"API error: {e}", file=sys.stderr)
+            _last_api_error = err_msg
         return None
 
 
@@ -209,16 +247,8 @@ def disconnect_all(clients: list) -> None:
             pass
 
 
-def reconnect_clients(
-    addresses: list[str], is_auto: bool, old_clients: list | None = None
-) -> tuple[list, list[str]]:
-    if old_clients:
-        disconnect_all(old_clients)
-    if is_auto:
-        found = asyncio.run(scan_led_devices())
-        addresses = [addr for _name, addr in found]
-        if addresses:
-            print(f"Re-scan: found {len(addresses)} device(s): {addresses}", file=sys.stderr)
+def connect_to_addresses(addresses: list[str]) -> list:
+    """Try to connect to known addresses (no scan). Returns connected clients."""
     clients = []
     for addr in addresses:
         try:
@@ -226,8 +256,8 @@ def reconnect_clients(
             c.connect()
             clients.append(c)
         except Exception as e:
-            print(f"Reconnect {addr}: {e}", file=sys.stderr)
-    return (clients, addresses)
+            print(f"Connect {addr}: {e}", file=sys.stderr)
+    return clients
 
 
 def send_image_to_clients(clients: list, path: str, cleanup: bool = True) -> list:
@@ -251,30 +281,114 @@ def send_image_to_clients(clients: list, path: str, cleanup: bool = True) -> lis
     return working
 
 
+# Backoff constants
+BACKOFF_MIN_SEC = 5.0
+BACKOFF_MAX_SEC = 120.0
+
+
 class ReconnectState:
+    """Manages BLE reconnection with exponential backoff.
+    
+    Strategy:
+    1. If all clients connected -> do nothing.
+    2. If some clients dropped -> try reconnecting to known addresses only (fast, no scan).
+    3. If known-address reconnect fails -> do a full BLE scan (addresses may have changed).
+    4. Exponential backoff between attempts so we don't hammer the BLE radio.
+    """
+
     def __init__(self, addresses: list[str], is_auto: bool):
         self.addresses = addresses
         self.is_auto = is_auto
-        self.last_reconnect = time.monotonic()
+        self.last_attempt: float = 0.0
+        self.backoff: float = BACKOFF_MIN_SEC
+        self.consecutive_failures: int = 0
+
+    def _connected_addresses(self, clients: list) -> set[str]:
+        return {c.address for c in clients if hasattr(c, "address")}
+
+    def _missing_addresses(self, clients: list) -> list[str]:
+        connected = self._connected_addresses(clients)
+        return [a for a in self.addresses if a not in connected]
+
+    def _reset_backoff(self) -> None:
+        self.backoff = BACKOFF_MIN_SEC
+        self.consecutive_failures = 0
+
+    def _increase_backoff(self) -> None:
+        self.consecutive_failures += 1
+        self.backoff = min(BACKOFF_MAX_SEC, BACKOFF_MIN_SEC * (2 ** self.consecutive_failures))
+
+    def _cooldown_elapsed(self) -> bool:
+        return (time.monotonic() - self.last_attempt) >= self.backoff
 
     def maybe_reconnect(self, clients: list) -> list:
-        if len(clients) < len(self.addresses) and (time.monotonic() - self.last_reconnect) >= RECONNECT_COOLDOWN_SEC:
-            clients, self.addresses = reconnect_clients(self.addresses, self.is_auto, clients)
-            self.last_reconnect = time.monotonic()
+        """Called after every send. Reconnects dropped clients if needed."""
+        # All connected? Nothing to do.
+        if len(clients) >= len(self.addresses):
+            self._reset_backoff()
+            return clients
+
+        if not self._cooldown_elapsed():
+            return clients
+
+        self.last_attempt = time.monotonic()
+        missing = self._missing_addresses(clients)
+
+        if not missing:
+            return clients
+
+        # Step 1: Try known addresses directly (fast, no scan)
+        print(f"Reconnecting {len(missing)} display(s) by address...", file=sys.stderr)
+        new_clients = connect_to_addresses(missing)
+
+        if new_clients:
+            clients.extend(new_clients)
+            if len(clients) >= len(self.addresses):
+                print(f"All {len(clients)} display(s) reconnected.", file=sys.stderr)
+                self._reset_backoff()
+                return clients
+
+        # Step 2: Known-address reconnect didn't get all — scan if auto
+        if self.is_auto:
+            still_missing = len(self.addresses) - len(clients)
+            print(f"Still missing {still_missing} display(s); scanning...", file=sys.stderr)
+            found = asyncio.run(scan_led_devices(timeout=3.0))
+            new_addrs = [addr for _name, addr in found]
+            if new_addrs:
+                # Update address list (devices may have changed BLE address)
+                self.addresses = list(set(self.addresses) | set(new_addrs))
+                connected = self._connected_addresses(clients)
+                scan_missing = [a for a in new_addrs if a not in connected]
+                if scan_missing:
+                    scan_clients = connect_to_addresses(scan_missing)
+                    clients.extend(scan_clients)
+
+        if len(clients) >= len(self.addresses):
+            self._reset_backoff()
+        else:
+            self._increase_backoff()
+            print(f"Reconnect incomplete ({len(clients)}/{len(self.addresses)}); "
+                  f"next attempt in {self.backoff:.0f}s", file=sys.stderr)
+
         return clients
 
     def force_reconnect(self, clients: list) -> list:
-        if not clients and (time.monotonic() - self.last_reconnect) >= RECONNECT_COOLDOWN_SEC:
-            print("Reconnecting...", file=sys.stderr)
-            clients, self.addresses = reconnect_clients(self.addresses, self.is_auto, clients)
-            self.last_reconnect = time.monotonic()
-        return clients
+        """Called when all clients are gone. Same logic but always tries."""
+        if clients:
+            return clients
+        if not self._cooldown_elapsed():
+            return clients
+        print("All displays lost. Reconnecting...", file=sys.stderr)
+        return self.maybe_reconnect(clients)
 
 
 def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> None:
     cfg = load_config(config_path)
     font_path = resolve_font_path(cfg)
     api_url = (cfg.get("api_url") or "https://pruef.st/api/count").strip()
+    # Upgrade http to https if pointing at pruef.st (HTTPS is fine on Pi, avoids carrier interception)
+    if api_url.startswith("http://pruef.st"):
+        api_url = api_url.replace("http://", "https://", 1)
     poll_interval = max(0.5, float(cfg.get("poll_interval_sec", 1.0)))
     display_string = (cfg.get("display_string") or "").strip()
     suffix = cfg.get("suffix") or " x"
@@ -328,18 +442,17 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
     else:
         addresses, is_auto = resolve_device_addresses(cfg)
         if not addresses:
-            print("No devices configured (devices: auto or comma-separated addresses).", file=sys.stderr)
-            sys.exit(1)
-        print(f"Connecting to {len(addresses)} device(s)...", file=sys.stderr)
+            print("No devices found yet. Will keep retrying...", file=sys.stderr)
+        else:
+            print(f"Connecting to {len(addresses)} device(s)...", file=sys.stderr)
         print(f"API: {api_url}", file=sys.stderr)
-        clients, addresses = reconnect_clients(addresses, is_auto)
-        if not clients:
-            print("Could not connect to any display.", file=sys.stderr)
-            sys.exit(1)
-        try:
-            w, h = clients[0].get_device_info().width, clients[0].get_device_info().height
-        except Exception:
-            pass
+        if addresses:
+            clients = connect_to_addresses(addresses)
+        if clients:
+            try:
+                w, h = clients[0].get_device_info().width, clients[0].get_device_info().height
+            except Exception:
+                pass
         reconn = ReconnectState(addresses, is_auto)
         print(f"Display: {w}x{h} | Font: {font_path}", file=sys.stderr)
 
@@ -352,12 +465,13 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
         def force_reconnect(c: list) -> list:
             return reconn.force_reconnect(c)
 
+    # Pre-load font once (avoids re-reading TTF from SD card on every render)
+    _cached_font = load_font(font_path, font_size, font_width)
+
     def render(txt: str, text_col: tuple, bg_col: tuple) -> str:
         return render_text_to_image(
             txt, w, h,
-            font_path=font_path,
-            font_size=font_size,
-            font_width=font_width,
+            font=_cached_font,
             y_offset=y_offset,
             crisp=crisp,
             text_color=text_col,
@@ -365,6 +479,10 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
         )
 
     prev_count: int | None = None
+    last_sent_text: str | None = None   # track what's on display to skip redundant sends
+    last_status_write: float = 0.0      # throttle status.json writes
+    STATUS_WRITE_INTERVAL = 10.0        # write status at most every 10s (unless count changes)
+
     try:
         while True:
             clients = force_reconnect(clients)
@@ -398,6 +516,8 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                         os.unlink(normal_img)
                     except OSError:
                         pass
+                    last_sent_text = text_to_show  # flash already showed it
+
                 elif count_incremented and effect == "screen":
                     normal_img = render(text_to_show, text_color, bg_color)
                     flash_paths = [save_solid_image(w, h, flash_color_rgb)]
@@ -415,24 +535,38 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                         os.unlink(normal_img)
                     except OSError:
                         pass
+                    last_sent_text = text_to_show  # flash already showed it
 
-                send_and_reconnect(render(text_to_show, text_color, bg_color))
+                # Only render+send if the displayed text actually changed
+                if text_to_show != last_sent_text:
+                    send_and_reconnect(render(text_to_show, text_color, bg_color))
+                    last_sent_text = text_to_show
 
                 if count is not None:
+                    count_changed = count != prev_count
                     prev_count = count
-                    if dry_run:
-                        ble_addrs = []
-                        ble_count = 0
-                    else:
-                        ble_addrs = [c.address for c in clients if hasattr(c, "address")]
-                        ble_count = len([c for c in clients if c is not None])
-                    write_status(last_count=count, ble_connected=ble_count, ble_addresses=ble_addrs)
+                    # Write status: immediately on count change, otherwise throttled
+                    now = time.monotonic()
+                    if count_changed or (now - last_status_write) >= STATUS_WRITE_INTERVAL:
+                        if dry_run:
+                            ble_addrs = []
+                            ble_count = 0
+                        else:
+                            ble_addrs = [c.address for c in clients if hasattr(c, "address")]
+                            ble_count = len([c for c in clients if c is not None])
+                        write_status(last_error="", last_count=count, api_ok=True, ble_connected=ble_count, ble_addresses=ble_addrs)
+                        last_status_write = now
             else:
                 # API unreachable: show last or "--"
-                if prev_count is not None:
-                    send_and_reconnect(render(f"{prev_count}{suffix}", text_color, bg_color))
-                else:
-                    send_and_reconnect(render("--", text_color, bg_color))
+                fallback_text = f"{prev_count}{suffix}" if prev_count is not None else "--"
+                if fallback_text != last_sent_text:
+                    send_and_reconnect(render(fallback_text, text_color, bg_color))
+                    last_sent_text = fallback_text
+                # Throttle error status writes too
+                now = time.monotonic()
+                if (now - last_status_write) >= STATUS_WRITE_INTERVAL:
+                    write_status(last_error="API unreachable", api_ok=False)
+                    last_status_write = now
 
             time.sleep(poll_interval)
     except KeyboardInterrupt:

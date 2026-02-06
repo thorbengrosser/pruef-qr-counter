@@ -45,3 +45,9 @@ Thumbs.db
 rpi/status.json
 rpi/venv/
 rpi/preview/
+rpi/config.json
+
+# Fonts (may not be redistributable)
+rpi/fonts/*.ttf
+rpi/fonts/*.otf
+testing/Kario*.ttf

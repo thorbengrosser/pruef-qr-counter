@@ -12,39 +12,37 @@ if [ ! -f "$CONFIG" ]; then
   exit 1
 fi
 
-get() {
-  local key="$1"
-  python3 -c "
-import json
+# Read all WiFi config values in one Python invocation (saves ~1.5s on Pi Zero 2 W)
+# Use venv python if available (has cached .pyc, faster startup)
+PYTHON="$RPI_DIR/venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON="python3"
+eval "$($PYTHON -c "
+import json, shlex
 try:
     with open(r'''$CONFIG''') as f:
         c = json.load(f)
-    print((c.get(r'''$key''') or '').strip())
+    for k in ('wifi_ssid', 'wifi_pass', 'wifi_ssid2', 'wifi_pass2'):
+        print(f'{k.upper()}={shlex.quote((c.get(k) or \"\").strip())}')
 except Exception:
-    print('')
-" 2>/dev/null
-}
+    for k in ('WIFI_SSID', 'WIFI_PASS', 'WIFI_SSID2', 'WIFI_PASS2'):
+        print(f'{k}=')
+" 2>/dev/null)"
 
-SSID1="$(get wifi_ssid)"
-PASS1="$(get wifi_pass)"
-SSID2="$(get wifi_ssid2)"
-PASS2="$(get wifi_pass2)"
-
-if [ -z "$SSID1" ]; then
+if [ -z "$WIFI_SSID" ]; then
   echo "No primary WiFi configured" >&2
   exit 1
 fi
 
-echo "Trying primary: $SSID1" >&2
-if nmcli device wifi connect "$SSID1" password "$PASS1" 2>/dev/null; then
-  echo "Connected to $SSID1" >&2
+echo "Trying primary: $WIFI_SSID" >&2
+if nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" 2>/dev/null; then
+  echo "Connected to $WIFI_SSID" >&2
   exit 0
 fi
 
-if [ -n "$SSID2" ]; then
-  echo "Trying backup: $SSID2" >&2
-  if nmcli device wifi connect "$SSID2" password "$PASS2" 2>/dev/null; then
-    echo "Connected to $SSID2" >&2
+if [ -n "$WIFI_SSID2" ]; then
+  echo "Trying backup: $WIFI_SSID2" >&2
+  if nmcli device wifi connect "$WIFI_SSID2" password "$WIFI_PASS2" 2>/dev/null; then
+    echo "Connected to $WIFI_SSID2" >&2
     exit 0
   fi
 fi
