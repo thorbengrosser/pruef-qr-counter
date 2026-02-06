@@ -83,12 +83,14 @@ Wants=network-online.target bluetooth.target
 Type=simple
 WorkingDirectory=$RPI_DIR
 ExecStartPre=/usr/sbin/rfkill unblock bluetooth
-ExecStartPre=/bin/sleep 1
+ExecStartPre=/bin/sleep 5
 ExecStart=$RPI_DIR/venv/bin/python $RPI_DIR/display_app.py
 Restart=always
-RestartSec=3
+RestartSec=5
 User=root
 Group=root
+# Performance logging: set PRUF_DEBUG=1 for verbose timing output
+# Environment=PRUF_DEBUG=1
 
 [Install]
 WantedBy=multi-user.target

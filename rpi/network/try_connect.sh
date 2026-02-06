@@ -33,6 +33,19 @@ if [ -z "$WIFI_SSID" ]; then
   exit 1
 fi
 
+# Check if already connected to primary or backup SSID (skip reconnect to avoid radio disruption)
+CURRENT_SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
+if [ -n "$CURRENT_SSID" ]; then
+  if [ "$CURRENT_SSID" = "$WIFI_SSID" ]; then
+    echo "Already connected to primary: $WIFI_SSID" >&2
+    exit 0
+  fi
+  if [ -n "$WIFI_SSID2" ] && [ "$CURRENT_SSID" = "$WIFI_SSID2" ]; then
+    echo "Already connected to backup: $WIFI_SSID2" >&2
+    exit 0
+  fi
+fi
+
 echo "Trying primary: $WIFI_SSID" >&2
 if nmcli device wifi connect "$WIFI_SSID" password "$WIFI_PASS" 2>/dev/null; then
   echo "Connected to $WIFI_SSID" >&2

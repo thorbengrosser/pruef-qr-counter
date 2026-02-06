@@ -130,14 +130,13 @@ def try_connect_sta() -> bool:
     return False
 
 
-def _async_reconnect() -> None:
-    """Run WiFi reconnect + display restart in background thread."""
+def _async_wifi_reconnect() -> None:
+    """Run WiFi reconnect in background thread (only when WiFi settings changed).
+
+    Display service is NOT restarted — it hot-reloads config.json automatically.
+    """
     try:
         try_connect_sta()
-    except Exception:
-        pass
-    try:
-        restart_display_service()
     except Exception:
         pass
 
@@ -726,6 +725,7 @@ def status_page():
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
+        old_config = load_config()
         data = {
             "wifi_ssid": (request.form.get("wifi_ssid") or "").strip()[:32],
             "wifi_pass": (request.form.get("wifi_pass") or "").strip()[:64],
@@ -753,15 +753,26 @@ def index():
         }
         try:
             save_config(data)
-            # Reconnect WiFi and restart display in background (don't block HTTP response)
-            threading.Thread(target=_async_reconnect, daemon=True).start()
+            # Only reconnect WiFi if WiFi settings actually changed
+            # Display service hot-reloads config.json automatically (no restart needed!)
+            wifi_changed = (
+                data["wifi_ssid"] != old_config.get("wifi_ssid", "") or
+                data["wifi_pass"] != old_config.get("wifi_pass", "") or
+                data["wifi_ssid2"] != old_config.get("wifi_ssid2", "") or
+                data["wifi_pass2"] != old_config.get("wifi_pass2", "")
+            )
+            if wifi_changed:
+                threading.Thread(target=_async_wifi_reconnect, daemon=True).start()
+                message = "Saved. WiFi reconnecting in background\u2026"
+            else:
+                message = "Saved. Display will update within seconds."
             return render_template_string(
                 CONFIG_HTML,
                 config=type("C", (), data)(),
                 fonts=list_fonts(),
                 status=load_status(),
                 norm_hex=_norm_hex,
-                message="Saved. Reconnecting in background…",
+                message=message,
                 error=False,
             )
         except Exception as e:

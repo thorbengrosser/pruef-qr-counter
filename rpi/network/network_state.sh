@@ -1,28 +1,42 @@
 #!/bin/bash
 # Network state machine for PRÜF Counter.
 #
+# IMPORTANT: On Pi Zero 2 W, WiFi and BLE share the same radio (BCM43436S).
+# Aggressive WiFi reconnection disrupts BLE operations (display updates).
+# This script is intentionally conservative: when WiFi is associated, it does
+# NOT try to reconnect even if internet is flaky. Only reconnects when WiFi
+# is truly disconnected (no IP on wlan0).
+#
 # First boot (never connected): aggressive — try every 5s for 30s, then AP.
-# After connected once: patient — try every 15s for 5 minutes before AP.
-# When connected: do nothing (lightweight check every 15s).
+# After connected once: patient — only reconnect if WiFi drops completely.
+# When associated: lightweight check every 30s, no reconnection attempts.
 # After AP: keep checking every 60s if a hotspot comes back.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FIRST_BOOT_INTERVAL=5
 FIRST_BOOT_TIMEOUT=30
-NORMAL_INTERVAL=15
-PATIENCE_TIMEOUT=300   # 5 minutes
-AP_RETRY_INTERVAL=60   # check for hotspots while in AP mode
+CONNECTED_INTERVAL=30   # check interval when WiFi is up (was 15, increased to reduce radio use)
+PATIENCE_TIMEOUT=300     # 5 minutes
+AP_RETRY_INTERVAL=60     # check for hotspots while in AP mode
+NO_INTERNET_THRESHOLD=10 # consecutive no-internet checks before reconnect attempt
 
 ever_connected=false
 in_ap_mode=false
+no_internet_count=0
 
-is_connected() {
+is_wifi_associated() {
+  # Check if wlan0 has an IPv4 address (WiFi is associated)
   ip -4 addr show wlan0 2>/dev/null | grep -q "inet " && return 0
   return 1
 }
 
 has_internet() {
+  # Try multiple methods — ICMP ping OR DNS resolution
+  # Flaky hotspots may block ICMP but still route traffic
   ping -c1 -W2 8.8.8.8 &>/dev/null && return 0
+  ping -c1 -W2 1.1.1.1 &>/dev/null && return 0
+  # DNS resolution as fallback (works when ICMP is blocked)
+  getent hosts pruef.st &>/dev/null && return 0
   return 1
 }
 
@@ -63,8 +77,9 @@ fi
 
 # ── Phase 2: Main loop ──────────────────────────────────────────────
 while true; do
-  if is_connected && has_internet; then
-    # Online — reset state
+  if is_wifi_associated; then
+    # WiFi is associated (has IP) — do NOT try to reconnect!
+    # Reconnecting disrupts the shared WiFi/BLE radio on Pi Zero 2 W.
     if [ "$ever_connected" = false ]; then
       echo "First connection established." >&2
     fi
@@ -72,7 +87,21 @@ while true; do
     if [ "$in_ap_mode" = true ]; then
       stop_ap
     fi
-    sleep "$NORMAL_INTERVAL"
+
+    # Lightweight internet check (no reconnection, just monitoring)
+    if has_internet; then
+      no_internet_count=0
+    else
+      no_internet_count=$(( no_internet_count + 1 ))
+      if [ "$no_internet_count" -ge "$NO_INTERNET_THRESHOLD" ]; then
+        # WiFi associated but no internet for a long time (5+ minutes)
+        # This might mean the AP has no upstream — try reconnecting once
+        echo "WiFi associated but no internet for ${no_internet_count} checks. Trying reconnect..." >&2
+        try_wifi || true
+        no_internet_count=0
+      fi
+    fi
+    sleep "$CONNECTED_INTERVAL"
 
   elif [ "$in_ap_mode" = true ]; then
     # In AP mode — periodically check if a hotspot came back
@@ -84,13 +113,14 @@ while true; do
     sleep "$AP_RETRY_INTERVAL"
 
   else
-    # Disconnected — try to reconnect with patience
+    # WiFi completely disconnected (no IP) — try to reconnect
+    no_internet_count=0
     if [ "$ever_connected" = true ]; then
       patience="$PATIENCE_TIMEOUT"
     else
       patience="$FIRST_BOOT_TIMEOUT"
     fi
-    echo "Disconnected. Trying to reconnect (${patience}s patience)..." >&2
+    echo "WiFi disconnected. Trying to reconnect (${patience}s patience)..." >&2
     reconnect_start=$SECONDS
     reconnected=false
     while [ $(( SECONDS - reconnect_start )) -lt "$patience" ]; do
@@ -100,7 +130,7 @@ while true; do
         ever_connected=true
         break
       fi
-      sleep "$NORMAL_INTERVAL"
+      sleep "$CONNECTED_INTERVAL"
     done
     if [ "$reconnected" = false ]; then
       start_ap
