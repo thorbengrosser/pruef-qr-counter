@@ -9,39 +9,20 @@ import os
 import subprocess
 import sys
 import threading
+import time
+import types
 
 import io
-from flask import Flask, request, redirect, url_for, render_template_string, Response, jsonify
+from flask import Flask, request, render_template_string, Response, jsonify
 
 RPI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.environ.get("CONFIG_PATH") or os.path.join(RPI_DIR, "config.json")
 FONTS_DIR = os.path.join(RPI_DIR, "fonts")
 
-DEFAULTS = {
-    "wifi_ssid": "",
-    "wifi_pass": "",
-    "wifi_ssid2": "",
-    "wifi_pass2": "",
-    "api_url": "https://pruef.st/api/count",  # HTTPS preferred; auto-upgraded for pruef.st
-    "poll_interval_sec": 1.0,
-    "display_string": "",
-    "suffix": " x",
-    "font": "Kario39C3Var-Roman.ttf",
-    "font_size": 22,
-    "font_width": 100,
-    "y_offset": 1,
-    "crisp": True,
-    "text_color": "ffffff",
-    "bg_color": "000000",
-    "effect": "invert",
-    "flash_duration_sec": 0.15,
-    "flash_repeat": 3,
-    "flash_text_color": "000000",
-    "flash_bg_color": "ffffff",
-    "flash_color": "ffffff",
-    "flash_color2": "",
-    "devices": "auto",
-}
+# Import shared defaults (single source of truth for both display daemon and config UI)
+if RPI_DIR not in sys.path:
+    sys.path.insert(0, RPI_DIR)
+from defaults import CONFIG_DEFAULTS as DEFAULTS
 
 app = Flask(__name__)
 
@@ -99,28 +80,6 @@ def list_fonts() -> list[str]:
     if not fonts:
         fonts = ["Kario39C3Var-Roman.ttf"]
     return fonts
-
-
-def restart_display_service() -> bool:
-    try:
-        subprocess.run(
-            ["systemctl", "restart", "pruf-display.service"],
-            timeout=5,
-            capture_output=True,
-        )
-        return True
-    except Exception:
-        pass
-    try:
-        subprocess.run(
-            ["sudo", "systemctl", "restart", "pruf-display.service"],
-            timeout=5,
-            capture_output=True,
-        )
-        return True
-    except Exception:
-        pass
-    return False
 
 
 def try_connect_sta() -> bool:
@@ -381,8 +340,7 @@ _SERVICE_CACHE_TTL = 5.0   # seconds
 
 def get_service_status(service_name: str) -> dict:
     """Check systemd service status with caching. Returns {active: bool, status: str}."""
-    import time as _time
-    now = _time.monotonic()
+    now = time.monotonic()
     cached = _service_cache.get(service_name)
     if cached and (now - cached[0]) < _SERVICE_CACHE_TTL:
         return cached[1]
@@ -406,9 +364,8 @@ def get_service_status(service_name: str) -> dict:
 
 def get_service_status_full(service_name: str) -> dict:
     """Full systemd status with journal lines. Used for /status HTML page only."""
-    import time as _time
     cache_key = service_name + ":full"
-    now = _time.monotonic()
+    now = time.monotonic()
     cached = _service_cache.get(cache_key)
     if cached and (now - cached[0]) < _SERVICE_CACHE_TTL:
         return cached[1]
@@ -440,8 +397,7 @@ _WIFI_CACHE_TTL = 5.0
 
 def get_wifi_status() -> dict:
     """Get WiFi connection status via nmcli (cached)."""
-    import time as _time
-    now = _time.monotonic()
+    now = time.monotonic()
     if _wifi_cache and (now - _wifi_cache.get("ts", 0)) < _WIFI_CACHE_TTL:
         return _wifi_cache["result"]
     try:
@@ -494,16 +450,7 @@ def status_json():
     })
 
 
-@app.route("/status")
-def status_page():
-    """HTML status dashboard."""
-    status = load_status()
-    display_service = get_service_status_full("pruf-display.service")
-    config_service = get_service_status_full("pruf-config-server.service")
-    network_service = get_service_status_full("pruf-network.service")
-    wifi = get_wifi_status()
-    
-    STATUS_HTML = """
+STATUS_HTML = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -711,8 +658,18 @@ def status_page():
     </script>
 </body>
 </html>
-    """
-    
+"""
+
+
+@app.route("/status")
+def status_page():
+    """HTML status dashboard."""
+    status = load_status()
+    display_service = get_service_status_full("pruf-display.service")
+    config_service = get_service_status_full("pruf-config-server.service")
+    network_service = get_service_status_full("pruf-network.service")
+    wifi = get_wifi_status()
+
     # Format last_update timestamp
     from datetime import datetime
     last_update_ts = status.get("last_update")
@@ -778,7 +735,7 @@ def index():
                 message = "Saved. Display will update within seconds."
             return render_template_string(
                 CONFIG_HTML,
-                config=type("C", (), data)(),
+                config=types.SimpleNamespace(**data),
                 fonts=list_fonts(),
                 status=load_status(),
                 norm_hex=_norm_hex,
@@ -803,7 +760,7 @@ def index():
         fonts.insert(0, config["font"])
     return render_template_string(
         CONFIG_HTML,
-        config=type("C", (), {**DEFAULTS, **config})(),
+        config=types.SimpleNamespace(**{**DEFAULTS, **config}),
         fonts=fonts,
         status=load_status(),
         norm_hex=_norm_hex,

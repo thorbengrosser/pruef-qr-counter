@@ -170,6 +170,14 @@ systemctl start pruf-network.service || true
 echo "Starting display daemon..."
 systemctl start $DISPLAY_SERVICE || true
 
+# Fix ownership: install.sh runs as root but the pi user needs to write fonts/, config, etc.
+if id pi &>/dev/null; then
+  echo "Fixing file ownership for pi user..."
+  chown -R pi:pi "$RPI_DIR/fonts" 2>/dev/null || true
+  chown pi:pi "$RPI_DIR/config.json" 2>/dev/null || true
+  chown pi:pi "$RPI_DIR/status.json" 2>/dev/null || true
+fi
+
 echo ""
 echo "Install done. Config UI: http://$(hostname -I | awk '{print $1}')/ or http://pruf.local/"
 echo "If no WiFi configured, connect to AP PRUF-Setup and open http://192.168.4.1 (after network/AP setup)."

@@ -31,12 +31,18 @@ is_wifi_associated() {
 }
 
 has_internet() {
-  # Try multiple methods — ICMP ping OR DNS resolution
-  # Flaky hotspots may block ICMP but still route traffic
-  ping -c1 -W2 8.8.8.8 &>/dev/null && return 0
-  ping -c1 -W2 1.1.1.1 &>/dev/null && return 0
-  # DNS resolution as fallback (works when ICMP is blocked)
-  getent hosts pruef.st &>/dev/null && return 0
+  # Try multiple methods in parallel — any success means internet is up.
+  # Serial fallback took 6s when all failed; parallel takes ~2s max.
+  ping -c1 -W2 8.8.8.8 &>/dev/null &
+  local p1=$!
+  ping -c1 -W2 1.1.1.1 &>/dev/null &
+  local p2=$!
+  getent hosts pruef.st &>/dev/null &
+  local p3=$!
+  # Wait for any to succeed (exit 0); if all fail, return 1
+  wait $p1 && return 0
+  wait $p2 && return 0
+  wait $p3 && return 0
   return 1
 }
 

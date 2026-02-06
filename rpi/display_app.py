@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import sys
 import tempfile
 import time
@@ -110,13 +111,18 @@ def write_status(
     ble_connected: int = 0,
     ble_addresses: list[str] | None = None,
 ) -> None:
-    """Write status for config UI (last error, last count, api_ok, BLE info)."""
+    """Write status for config UI (last error, last count, api_ok, BLE info).
+
+    Uses atomic write (temp file + rename) so readers never see partial JSON.
+    """
     try:
         data = {}
         sp = _status_path()
         if os.path.isfile(sp):
             with open(sp, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                raw = f.read().strip()
+                if raw:
+                    data = json.loads(raw)
         if last_error is not None:
             data["last_error"] = last_error
         if last_count is not None:
@@ -126,8 +132,16 @@ def write_status(
         if ble_addresses is not None:
             data["ble_addresses"] = ble_addresses
         data["last_update"] = time.time()
-        with open(sp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=0)
+        # Atomic write: write to temp file, then rename (rename is atomic on Linux)
+        sp_dir = os.path.dirname(sp)
+        fd, tmp_path = tempfile.mkstemp(suffix=".tmp", dir=sp_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=0)
+            os.replace(tmp_path, sp)
+        except Exception:
+            _cleanup_file(tmp_path)
+            raise
     except Exception:
         pass
 
@@ -140,28 +154,7 @@ def load_config(path: str | None = None) -> dict:
         return json.load(f)
 
 
-# Minimal defaults when config.json is missing or invalid (so daemon can start; fix via config UI).
-_CONFIG_DEFAULTS = {
-    "api_url": "https://pruef.st/api/count",
-    "poll_interval_sec": 1.0,
-    "display_string": "",
-    "suffix": " x",
-    "font": "Kario39C3Var-Roman.ttf",
-    "font_size": 22,
-    "font_width": 100,
-    "y_offset": 1,
-    "crisp": True,
-    "text_color": "ffffff",
-    "bg_color": "000000",
-    "effect": "invert",
-    "flash_duration_sec": 0.15,
-    "flash_repeat": 3,
-    "flash_text_color": "000000",
-    "flash_bg_color": "ffffff",
-    "flash_color": "ffffff",
-    "flash_color2": "",
-    "devices": "auto",
-}
+from defaults import CONFIG_DEFAULTS as _CONFIG_DEFAULTS
 
 
 def load_config_with_fallback(config_path: str) -> tuple[dict, str]:
@@ -288,24 +281,6 @@ def render_text_to_image(
     return path
 
 
-def render_checkmark_frame(width: int, height: int) -> str:
-    """Render green background with large white checkmark for success flash overlay."""
-    bg = (0, 204, 68)   # vivid green
-    fg = (255, 255, 255) # white
-    img = Image.new("RGB", (width, height), bg)
-    draw = ImageDraw.Draw(img)
-    # Draw a checkmark scaled to the display (e.g. 64x16)
-    cx, cy = width // 2, height // 2
-    # Short arm: going down-right to the bottom of the V
-    # Long arm: going up-right from the V
-    draw.line([(cx - 8, cy), (cx - 2, cy + 5)], fill=fg, width=3)
-    draw.line([(cx - 2, cy + 5), (cx + 9, cy - 6)], fill=fg, width=3)
-    fd, path = tempfile.mkstemp(suffix=".png", dir=_TMPDIR)
-    os.close(fd)
-    img.save(path)
-    return path
-
-
 def save_solid_image(width: int, height: int, color: tuple[int, int, int]) -> str:
     img = Image.new("RGB", (width, height), color)
     fd, path = tempfile.mkstemp(suffix=".png", dir=_TMPDIR)
@@ -411,6 +386,9 @@ def connect_to_addresses(addresses: list[str]) -> list:
                     log.info("Connected: %s", addr)
         except TimeoutError:
             log.warning("BLE connect timed out after 15s")
+            # Cancel remaining futures so stale threads don't hold the radio
+            for fut in futures:
+                fut.cancel()
     return clients
 
 
@@ -446,6 +424,8 @@ def send_image_to_clients(clients: list, path: str, cleanup: bool = True) -> lis
                     working.append(client)
         except TimeoutError:
             log.warning("BLE send timed out after 15s")
+            for fut in futures:
+                fut.cancel()
     if cleanup:
         _cleanup_file(path)
     return working
@@ -690,8 +670,18 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
     STATUS_WRITE_INTERVAL = 10.0        # write status at most every 10s (unless count changes)
     api_was_down: bool = False           # track API state for error clearing
 
+    # SIGTERM handler: systemd sends SIGTERM to stop the service; log and exit cleanly.
+    _shutdown = False
+
+    def _handle_sigterm(signum, frame):
+        nonlocal _shutdown
+        log.info("Received SIGTERM, shutting down...")
+        _shutdown = True
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     try:
-        while True:
+        while not _shutdown:
             loop_start = time.monotonic()
 
             # ── Hot config reload ─────────────────────────────────────
@@ -755,8 +745,8 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                             time.sleep(dcfg.flash_duration)
                         _cleanup_file(flash_img)
                         _cleanup_file(normal_img)
-                    # Reconnect any display that dropped during the flash, then resend normal frame
-                    if not dry_run and reconn is not None:
+                    # Only reconnect + resend if a display actually dropped during the flash
+                    if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
                         clients = reconn.maybe_reconnect(clients)
                         send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
                     last_sent_text = text_to_show
@@ -776,8 +766,8 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                         for fp in flash_paths:
                             _cleanup_file(fp)
                         _cleanup_file(normal_img)
-                    # Reconnect any display that dropped during the flash, then resend normal frame
-                    if not dry_run and reconn is not None:
+                    # Only reconnect + resend if a display actually dropped during the flash
+                    if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
                         clients = reconn.maybe_reconnect(clients)
                         send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
                     last_sent_text = text_to_show
@@ -826,6 +816,8 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
 
     except KeyboardInterrupt:
         log.info("Stopped (KeyboardInterrupt)")
+    else:
+        log.info("Stopped (SIGTERM)")
     finally:
         if not dry_run:
             disconnect_all(clients)
