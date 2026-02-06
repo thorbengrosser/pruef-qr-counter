@@ -404,13 +404,13 @@ def connect_to_addresses(addresses: list[str]) -> list:
         futures = {BLE_THREAD_POOL.submit(_connect_one, addr): addr for addr in addresses}
         clients = []
         try:
-            for fut in as_completed(futures, timeout=30):
+            for fut in as_completed(futures, timeout=15):
                 client, addr = fut.result()
                 if client is not None:
                     clients.append(client)
                     log.info("Connected: %s", addr)
         except TimeoutError:
-            log.warning("BLE connect timed out after 30s")
+            log.warning("BLE connect timed out after 15s")
     return clients
 
 
@@ -756,7 +756,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                             send_and_reconnect(normal_img, cleanup=False)
                             time.sleep(dcfg.flash_duration)
                         send_and_reconnect(check_img, cleanup=False)
-                        time.sleep(dcfg.flash_duration)
+                        time.sleep(max(dcfg.flash_duration * 2, 0.35))  # checkmark a bit longer
                         send_and_reconnect(normal_img, cleanup=False)
                         _cleanup_file(check_img)
                         _cleanup_file(flash_img)
@@ -782,7 +782,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                             send_and_reconnect(normal_img, cleanup=False)
                             time.sleep(dcfg.flash_duration)
                         send_and_reconnect(check_img, cleanup=False)
-                        time.sleep(dcfg.flash_duration)
+                        time.sleep(max(dcfg.flash_duration * 2, 0.35))  # checkmark a bit longer
                         send_and_reconnect(normal_img, cleanup=False)
                         _cleanup_file(check_img)
                         for fp in flash_paths:
