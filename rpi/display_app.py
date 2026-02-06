@@ -554,6 +554,17 @@ class ReconnectState:
             return clients
         if not self._cooldown_elapsed():
             return clients
+        # No known addresses (e.g. none found at startup) — scan for devices first
+        if not self.addresses and self.is_auto:
+            self.last_attempt = time.monotonic()
+            log.info("Scanning for LED_BLE_* devices...")
+            with PerfTimer("BLE scan (no addresses)"):
+                found = asyncio.run(scan_led_devices(timeout=5.0))
+            self.addresses = [addr for _name, addr in found]
+            if not self.addresses:
+                log.warning("No LED_BLE_* devices found; will retry in %.0fs", self.backoff)
+                self._increase_backoff()
+                return []
         log.info("All displays lost. Reconnecting...")
         return self.maybe_reconnect(clients)
 
