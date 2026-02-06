@@ -6,7 +6,8 @@ from flask import (
     jsonify,
     render_template,
     Response,
-    current_app,
+    redirect,
+    url_for,
 )
 from functools import wraps
 
@@ -172,6 +173,46 @@ def api_admin_adjust():
 def dashboard():
     stats = dashboard_stats()
     return render_template("dashboard.html", stats=stats)
+
+
+@bp.route("/admin/control")
+@require_dashboard_auth
+def admin_control():
+    """Minimal mobile-friendly control: reset and adjust. Same auth as dashboard."""
+    data = get_count()
+    done = request.args.get("done")
+    error = request.args.get("error")
+    return render_template(
+        "admin_control.html",
+        count=data["count"],
+        epoch=data["epoch"],
+        done=done,
+        error=error,
+    )
+
+
+@bp.route("/admin/do-reset", methods=["POST"])
+@require_dashboard_auth
+def admin_do_reset():
+    admin_reset()
+    return redirect(url_for("main.admin_control", done="reset"))
+
+
+@bp.route("/admin/do-adjust", methods=["POST"])
+@require_dashboard_auth
+def admin_do_adjust():
+    raw = request.form.get("delta")
+    if raw is None:
+        return redirect(url_for("main.admin_control", error="delta"))
+    try:
+        delta = int(raw)
+    except (TypeError, ValueError):
+        return redirect(url_for("main.admin_control", error="delta"))
+    if abs(delta) > 10000:
+        return redirect(url_for("main.admin_control", error="range"))
+    admin_user_id = user_id_from_ip("admin-control")
+    admin_adjust(admin_user_id, delta)
+    return redirect(url_for("main.admin_control", done="adjust"))
 
 
 # ----- Health -----
