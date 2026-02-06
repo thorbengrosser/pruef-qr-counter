@@ -746,19 +746,13 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
 
                 if count_incremented and dcfg.effect == "invert":
                     with PerfTimer("Flash animation (invert)", warn_ms=5000):
-                        check_img = render_checkmark_frame(w, h)
                         flash_img = dcfg.render(text_to_show, dcfg.flash_text_rgb, dcfg.flash_bg_rgb, w, h)
                         normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
-                        # Flash flash flash → green checkmark → new number
                         for _ in range(dcfg.flash_repeat):
                             send_and_reconnect(flash_img, cleanup=False)
                             time.sleep(dcfg.flash_duration)
                             send_and_reconnect(normal_img, cleanup=False)
                             time.sleep(dcfg.flash_duration)
-                        send_and_reconnect(check_img, cleanup=False)
-                        time.sleep(max(dcfg.flash_duration * 2, 0.35))  # checkmark a bit longer
-                        send_and_reconnect(normal_img, cleanup=False)
-                        _cleanup_file(check_img)
                         _cleanup_file(flash_img)
                         _cleanup_file(normal_img)
                     # Reconnect any display that dropped during the flash, then resend normal frame
@@ -769,22 +763,16 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
 
                 elif count_incremented and dcfg.effect == "screen":
                     with PerfTimer("Flash animation (screen)", warn_ms=5000):
-                        check_img = render_checkmark_frame(w, h)
                         normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
                         flash_paths = [save_solid_image(w, h, dcfg.flash_color_rgb)]
                         if dcfg.flash_color2_rgb:
                             flash_paths.append(save_solid_image(w, h, dcfg.flash_color2_rgb))
-                        # Flash flash flash → green checkmark → new number
                         for _ in range(dcfg.flash_repeat):
                             for fp in flash_paths:
                                 send_and_reconnect(fp, cleanup=False)
                                 time.sleep(dcfg.flash_duration)
                             send_and_reconnect(normal_img, cleanup=False)
                             time.sleep(dcfg.flash_duration)
-                        send_and_reconnect(check_img, cleanup=False)
-                        time.sleep(max(dcfg.flash_duration * 2, 0.35))  # checkmark a bit longer
-                        send_and_reconnect(normal_img, cleanup=False)
-                        _cleanup_file(check_img)
                         for fp in flash_paths:
                             _cleanup_file(fp)
                         _cleanup_file(normal_img)
