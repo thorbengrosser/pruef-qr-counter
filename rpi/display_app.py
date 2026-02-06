@@ -133,11 +133,57 @@ def write_status(
 
 
 def load_config(path: str | None = None) -> dict:
-    """Load config from JSON file. path defaults to rpi/config.json."""
+    """Load config from JSON file. path defaults to rpi/config.json. Raises on error."""
     if path is None:
         path = os.environ.get("CONFIG_PATH") or os.path.join(get_rpi_dir(), "config.json")
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+# Minimal defaults when config.json is missing or invalid (so daemon can start; fix via config UI).
+_CONFIG_DEFAULTS = {
+    "api_url": "https://pruef.st/api/count",
+    "poll_interval_sec": 1.0,
+    "display_string": "",
+    "suffix": " x",
+    "font": "Kario39C3Var-Roman.ttf",
+    "font_size": 22,
+    "font_width": 100,
+    "y_offset": 1,
+    "crisp": True,
+    "text_color": "ffffff",
+    "bg_color": "000000",
+    "effect": "invert",
+    "flash_duration_sec": 0.15,
+    "flash_repeat": 3,
+    "flash_text_color": "000000",
+    "flash_bg_color": "ffffff",
+    "flash_color": "ffffff",
+    "flash_color2": "",
+    "devices": "auto",
+}
+
+
+def load_config_with_fallback(config_path: str) -> tuple[dict, str]:
+    """Load config from config_path; if invalid/missing, try config.json.example then defaults.
+    Returns (config_dict, path_used). path_used is config_path so hot-reload watches the right file."""
+    rpi_dir = os.path.dirname(config_path)
+    example_path = os.path.join(rpi_dir, "config.json.example")
+
+    for path in (config_path, example_path):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+            if not raw:
+                continue
+            return (json.loads(raw), config_path)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    log.warning("config.json invalid/missing; using defaults. Save from http://pruf.local/ to fix.")
+    return (_CONFIG_DEFAULTS.copy(), config_path)
 
 
 def resolve_font_path(cfg: dict) -> str:
@@ -565,17 +611,9 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
     if config_path is None:
         config_path = os.environ.get("CONFIG_PATH") or os.path.join(get_rpi_dir(), "config.json")
 
-    try:
-        cfg = load_config(config_path)
-    except FileNotFoundError:
-        log.error("Config not found: %s", config_path)
-        sys.exit(1)
-    except json.JSONDecodeError as e:
-        log.error("Invalid config.json (bad JSON): %s", e)
-        sys.exit(1)
-
+    cfg, _ = load_config_with_fallback(config_path)
     dcfg = DisplayConfig(cfg)
-    config_mtime = os.path.getmtime(config_path)
+    config_mtime = os.path.getmtime(config_path) if os.path.isfile(config_path) else 0.0
 
     w = DEFAULT_WIDTH
     h = DEFAULT_HEIGHT
@@ -651,7 +689,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                 if new_mtime != config_mtime:
                     config_mtime = new_mtime
                     old_devices = dcfg.devices_raw
-                    cfg = load_config(config_path)
+                    cfg, _ = load_config_with_fallback(config_path)
                     dcfg = DisplayConfig(cfg)
                     log.info("Config reloaded (font=%s size=%d effect=%s poll=%.1fs)",
                              dcfg.font_path.split("/")[-1], dcfg.font_size,
