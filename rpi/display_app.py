@@ -362,7 +362,7 @@ def fetch_count(api_url: str) -> int | None:
     global _last_api_error
     try:
         with PerfTimer("API poll", warn_ms=1500):
-            r = _get_session().get(api_url, timeout=3)
+            r = _get_session().get(api_url, timeout=6)
             r.raise_for_status()
         if _last_api_error:
             log.info("API recovered (was: %s)", _last_api_error[:80])
