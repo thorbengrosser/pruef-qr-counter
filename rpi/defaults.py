@@ -8,6 +8,8 @@ CONFIG_DEFAULTS = {
     "wifi_pass": "",
     "wifi_ssid2": "",
     "wifi_pass2": "",
+    "wifi_ssid3": "",
+    "wifi_pass3": "",
     "api_url": "https://pruef.st/api/count",
     "poll_interval_sec": 1.0,
     "display_string": "",

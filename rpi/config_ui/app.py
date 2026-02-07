@@ -185,6 +185,11 @@ CONFIG_HTML = """<!DOCTYPE html>
         <div class="row"><label><span class="label">Password 2</span> <input type="text" name="wifi_pass2" value="{{ config.wifi_pass2 }}" maxlength="64" autocomplete="off"></label></div>
       </fieldset>
       <fieldset>
+        <legend>WiFi 3 (optional)</legend>
+        <div class="row"><label><span class="label">SSID 3</span> <input type="text" name="wifi_ssid3" value="{{ config.wifi_ssid3 }}" maxlength="32"></label></div>
+        <div class="row"><label><span class="label">Password 3</span> <input type="text" name="wifi_pass3" value="{{ config.wifi_pass3 }}" maxlength="64" autocomplete="off"></label></div>
+      </fieldset>
+      <fieldset>
         <legend>API</legend>
         <div class="row"><label><span class="label">Count API URL</span> <input type="text" name="api_url" value="{{ config.api_url }}" size="40"></label></div>
         <div class="row"><label><span class="label">Poll interval (sec)</span> <input type="number" name="poll_interval_sec" value="{{ config.poll_interval_sec }}" min="0.5" max="60" step="0.5"></label></div>
@@ -698,6 +703,8 @@ def index():
             "wifi_pass": (request.form.get("wifi_pass") or "").strip()[:64],
             "wifi_ssid2": (request.form.get("wifi_ssid2") or "").strip()[:32],
             "wifi_pass2": (request.form.get("wifi_pass2") or "").strip()[:64],
+            "wifi_ssid3": (request.form.get("wifi_ssid3") or "").strip()[:32],
+            "wifi_pass3": (request.form.get("wifi_pass3") or "").strip()[:64],
             "api_url": (request.form.get("api_url") or DEFAULTS["api_url"]).strip()[:256],
             "poll_interval_sec": max(0.5, min(60, float(request.form.get("poll_interval_sec") or 1))),
             "display_string": (request.form.get("display_string") or "").strip(),
@@ -726,7 +733,9 @@ def index():
                 data["wifi_ssid"] != old_config.get("wifi_ssid", "") or
                 data["wifi_pass"] != old_config.get("wifi_pass", "") or
                 data["wifi_ssid2"] != old_config.get("wifi_ssid2", "") or
-                data["wifi_pass2"] != old_config.get("wifi_pass2", "")
+                data["wifi_pass2"] != old_config.get("wifi_pass2", "") or
+                data["wifi_ssid3"] != old_config.get("wifi_ssid3", "") or
+                data["wifi_pass3"] != old_config.get("wifi_pass3", "")
             )
             if wifi_changed:
                 threading.Thread(target=_async_wifi_reconnect, daemon=True).start()
