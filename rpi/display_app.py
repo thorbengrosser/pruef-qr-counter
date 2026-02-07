@@ -751,11 +751,8 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
 
             # ── Reconnect dropped displays ────────────────────────────
             clients = force_reconnect(clients)
-            if not clients:
-                time.sleep(dcfg.poll_interval)
-                continue
 
-            # ── Poll API ──────────────────────────────────────────────
+            # ── Poll API (always, even when no displays connected) ────
             count = fetch_count(dcfg.api_url)
             if dry_run:
                 current_count[0] = count
@@ -778,48 +775,53 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                     and count > prev_count
                 )
 
-                if count_incremented and dcfg.effect == "invert":
-                    with PerfTimer("Flash animation (invert)", warn_ms=5000):
-                        flash_img = dcfg.render(text_to_show, dcfg.flash_text_rgb, dcfg.flash_bg_rgb, w, h)
-                        normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
-                        for _ in range(dcfg.flash_repeat):
-                            send_and_reconnect(flash_img, cleanup=False)
-                            time.sleep(dcfg.flash_duration)
-                            send_and_reconnect(normal_img, cleanup=False)
-                            time.sleep(dcfg.flash_duration)
-                        _cleanup_file(flash_img)
-                        _cleanup_file(normal_img)
-                    # Only reconnect + resend if a display actually dropped during the flash
-                    if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
-                        clients = reconn.maybe_reconnect(clients)
-                        send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
-                    last_sent_text = text_to_show
-
-                elif count_incremented and dcfg.effect == "screen":
-                    with PerfTimer("Flash animation (screen)", warn_ms=5000):
-                        normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
-                        flash_paths = [save_solid_image(w, h, dcfg.flash_color_rgb)]
-                        if dcfg.flash_color2_rgb:
-                            flash_paths.append(save_solid_image(w, h, dcfg.flash_color2_rgb))
-                        for _ in range(dcfg.flash_repeat):
-                            for fp in flash_paths:
-                                send_and_reconnect(fp, cleanup=False)
+                # Only do flash animations and BLE sends when we have connected displays
+                if clients:
+                    if count_incremented and dcfg.effect == "invert":
+                        with PerfTimer("Flash animation (invert)", warn_ms=5000):
+                            flash_img = dcfg.render(text_to_show, dcfg.flash_text_rgb, dcfg.flash_bg_rgb, w, h)
+                            normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
+                            for _ in range(dcfg.flash_repeat):
+                                send_and_reconnect(flash_img, cleanup=False)
                                 time.sleep(dcfg.flash_duration)
-                            send_and_reconnect(normal_img, cleanup=False)
-                            time.sleep(dcfg.flash_duration)
-                        for fp in flash_paths:
-                            _cleanup_file(fp)
-                        _cleanup_file(normal_img)
-                    # Only reconnect + resend if a display actually dropped during the flash
-                    if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
-                        clients = reconn.maybe_reconnect(clients)
-                        send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
-                    last_sent_text = text_to_show
+                                send_and_reconnect(normal_img, cleanup=False)
+                                time.sleep(dcfg.flash_duration)
+                            _cleanup_file(flash_img)
+                            _cleanup_file(normal_img)
+                        # Only reconnect + resend if a display actually dropped during the flash
+                        if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
+                            clients = reconn.maybe_reconnect(clients)
+                            send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
+                        last_sent_text = text_to_show
 
-                # Only render+send if the displayed text actually changed
-                if text_to_show != last_sent_text:
-                    send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
-                    last_sent_text = text_to_show
+                    elif count_incremented and dcfg.effect == "screen":
+                        with PerfTimer("Flash animation (screen)", warn_ms=5000):
+                            normal_img = dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h)
+                            flash_paths = [save_solid_image(w, h, dcfg.flash_color_rgb)]
+                            if dcfg.flash_color2_rgb:
+                                flash_paths.append(save_solid_image(w, h, dcfg.flash_color2_rgb))
+                            for _ in range(dcfg.flash_repeat):
+                                for fp in flash_paths:
+                                    send_and_reconnect(fp, cleanup=False)
+                                    time.sleep(dcfg.flash_duration)
+                                send_and_reconnect(normal_img, cleanup=False)
+                                time.sleep(dcfg.flash_duration)
+                            for fp in flash_paths:
+                                _cleanup_file(fp)
+                            _cleanup_file(normal_img)
+                        # Only reconnect + resend if a display actually dropped during the flash
+                        if not dry_run and reconn is not None and len(clients) < len(reconn.addresses):
+                            clients = reconn.maybe_reconnect(clients)
+                            send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
+                        last_sent_text = text_to_show
+
+                    # Only render+send if the displayed text actually changed
+                    if text_to_show != last_sent_text:
+                        send_and_reconnect(dcfg.render(text_to_show, dcfg.text_color, dcfg.bg_color, w, h))
+                        last_sent_text = text_to_show
+                else:
+                    # No displays connected — track what we'd show so we send it on reconnect
+                    last_sent_text = None
 
                 if count is not None:
                     count_changed = count != prev_count
@@ -840,7 +842,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
                 # API unreachable: show last or "--"
                 api_was_down = True
                 fallback_text = f"{prev_count}{dcfg.suffix}" if prev_count is not None else "--"
-                if fallback_text != last_sent_text:
+                if clients and fallback_text != last_sent_text:
                     send_and_reconnect(dcfg.render(fallback_text, dcfg.text_color, dcfg.bg_color, w, h))
                     last_sent_text = fallback_text
                 # Throttle error status writes too
