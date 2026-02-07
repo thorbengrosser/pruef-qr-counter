@@ -88,8 +88,9 @@ BLE_THREAD_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ble")
 
 # Backoff for BLE reconnection
 BACKOFF_MIN_SEC = 3.0
-BACKOFF_MAX_SEC = 60.0
-BACKOFF_FAST_RETRIES = 3  # first N retries stay at min backoff
+BACKOFF_MAX_SEC = 30.0           # capped at 30s (was 60s) — don't give up on known devices too long
+BACKOFF_FAST_RETRIES = 5         # first N retries stay at min backoff (was 3)
+BT_RESET_AFTER_FAILURES = 8     # reset BT adapter after this many consecutive scan failures
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -308,14 +309,56 @@ async def scan_led_devices(prefix: str = DEFAULT_DEVICE_PREFIX, timeout: float =
     ]
 
 
+def robust_scan(timeout: float = 10.0, retries: int = 3) -> list[tuple[str, str]]:
+    """Scan for LED_BLE_* devices with retries.
+
+    On the Pi Zero 2 W the shared WiFi/BLE radio makes scanning unreliable.
+    A longer scan window (10s vs 5s) and multiple attempts greatly improve
+    discovery rate. Between retries we sleep briefly to let the radio settle.
+    """
+    best: list[tuple[str, str]] = []
+    for attempt in range(1, retries + 1):
+        with PerfTimer(f"BLE scan attempt {attempt}/{retries}"):
+            found = asyncio.run(scan_led_devices(timeout=timeout))
+        # Keep the result with the most devices
+        if len(found) > len(best):
+            best = found
+            log.info("Scan %d/%d found %d device(s): %s",
+                     attempt, retries, len(found), [a for _, a in found])
+        else:
+            log.debug("Scan %d/%d found %d device(s) (best so far: %d)",
+                      attempt, retries, len(found), len(best))
+        # If we found at least 2 devices, good enough — stop early
+        if len(best) >= 2:
+            break
+        # Brief pause between retries to let the radio settle
+        if attempt < retries:
+            time.sleep(1)
+    return best
+
+
+def reset_bluetooth_adapter() -> None:
+    """Reset the HCI Bluetooth adapter. Helps when repeated scans find nothing.
+
+    On Pi Zero 2 W the adapter sometimes gets wedged after prolonged use.
+    """
+    import subprocess
+    try:
+        log.info("Resetting Bluetooth adapter (hci0)...")
+        subprocess.run(["hciconfig", "hci0", "reset"], timeout=5,
+                        capture_output=True, check=False)
+        time.sleep(2)
+    except Exception as e:
+        log.debug("BT adapter reset: %s", e)
+
+
 def resolve_device_addresses(cfg: dict) -> tuple[list[str], bool]:
     """(addresses, is_auto) from config 'devices'."""
     dev = (cfg.get("devices") or "auto").strip().lower()
     if dev == "auto":
-        with PerfTimer("BLE scan (auto)"):
-            found = asyncio.run(scan_led_devices())
+        found = robust_scan(timeout=10.0, retries=3)
         addrs = [addr for _name, addr in found]
-        log.info("Auto-scan found %d device(s): %s", len(addrs), addrs)
+        log.info("Auto-scan result: %d device(s): %s", len(addrs), addrs)
         return (addrs, True)
     addrs = [a.strip() for a in dev.split(",") if a.strip()]
     return (addrs, False)
@@ -507,8 +550,7 @@ class ReconnectState:
         if self.is_auto:
             still_missing = len(self.addresses) - len(clients)
             log.info("Still missing %d display(s); scanning...", still_missing)
-            with PerfTimer("BLE re-scan"):
-                found = asyncio.run(scan_led_devices(timeout=3.0))
+            found = robust_scan(timeout=8.0, retries=2)
             new_addrs = [addr for _name, addr in found]
             if new_addrs:
                 # Update address list (devices may have changed BLE address)
@@ -537,9 +579,11 @@ class ReconnectState:
         # No known addresses (e.g. none found at startup) — scan for devices first
         if not self.addresses and self.is_auto:
             self.last_attempt = time.monotonic()
+            # Reset BT adapter if we've been failing for a while
+            if self.consecutive_failures >= BT_RESET_AFTER_FAILURES:
+                reset_bluetooth_adapter()
             log.info("Scanning for LED_BLE_* devices...")
-            with PerfTimer("BLE scan (no addresses)"):
-                found = asyncio.run(scan_led_devices(timeout=5.0))
+            found = robust_scan(timeout=10.0, retries=3)
             self.addresses = [addr for _name, addr in found]
             if not self.addresses:
                 log.warning("No LED_BLE_* devices found; will retry in %.0fs", self.backoff)
