@@ -11,12 +11,13 @@ from flask import (
 )
 from functools import wraps
 
-from .config import ADMIN_KEY, DASHBOARD_USER, DASHBOARD_PASSWORD
+from .config import ADMIN_KEY, DASHBOARD_USER, DASHBOARD_PASSWORD, LOAD_TEST_BYPASS_KEY
 from .db import (
     get_client_ip,
     user_id_from_ip,
     get_count,
     do_check,
+    do_check_bypass,
     admin_reset,
     admin_adjust,
     dashboard_stats,
@@ -121,7 +122,11 @@ def api_check():
     ip = get_client_ip()
     user_id = user_id_from_ip(ip)
 
-    result = do_check(user_id)
+    # Optional bypass for load testing: X-Load-Test-Key must match LOAD_TEST_BYPASS_KEY
+    if LOAD_TEST_BYPASS_KEY and request.headers.get("X-Load-Test-Key") == LOAD_TEST_BYPASS_KEY:
+        result = do_check_bypass(user_id)
+    else:
+        result = do_check(user_id)
 
     if result.get("blocked"):
         return (

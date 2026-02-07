@@ -12,6 +12,9 @@ ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 DASHBOARD_USER = os.environ.get("DASHBOARD_USER", "admin")
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "change-me")
 
+# Optional: if set, POST /api/check with header X-Load-Test-Key: <value> skips rate limiting (for load testing)
+LOAD_TEST_BYPASS_KEY = os.environ.get("LOAD_TEST_BYPASS_KEY", "")
+
 # Rate limit: 10 checks per 10 minutes per user_id
 RATE_LIMIT_COUNT = 10
 RATE_LIMIT_WINDOW_SECONDS = 600

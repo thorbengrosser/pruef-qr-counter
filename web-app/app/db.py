@@ -192,6 +192,16 @@ def do_check(user_id: str) -> dict:
         return {"count": count, "epoch": epoch}
 
 
+def do_check_bypass(user_id: str) -> dict:
+    """Record a 'check' event without rate limiting. Used when X-Load-Test-Key matches LOAD_TEST_BYPASS_KEY."""
+    with get_db() as conn:
+        record_event(conn, user_id, "check", 1)
+        purge_old_events(conn)
+        count = count_current_epoch_all_types(conn)
+        epoch = get_current_epoch(conn)
+        return {"count": count, "epoch": epoch}
+
+
 def get_count() -> dict:
     """Current count and epoch for GET /api/count."""
     with get_db() as conn:
