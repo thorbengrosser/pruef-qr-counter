@@ -38,8 +38,8 @@ Thumbs.db
 .pioenvs/
 .piolibdeps/
 
-# Other
-#testing/
+# Other (local/remote load test and tools; not in repo)
+testing/
 
 # RPi runtime
 rpi/status.json
@@ -50,4 +50,3 @@ rpi/config.json
 # Fonts (may not be redistributable)
 rpi/fonts/*.ttf
 rpi/fonts/*.otf
-testing/Kario*.ttf

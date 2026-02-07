@@ -33,6 +33,23 @@ if [ -z "$WIFI_SSID" ]; then
   exit 1
 fi
 
+# Sync NetworkManager profiles from config.json so they win on boot.
+# Without this, NM's other saved connections (e.g. from initial Pi setup) often have
+# equal/higher autoconnect-priority and get chosen first on reboot.
+sync_nm_profile() {
+  local ssid="$1" pass="$2" priority="$3"
+  [ -n "$ssid" ] || return 0
+  if nmcli connection show "$ssid" &>/dev/null; then
+    nmcli connection modify "$ssid" connection.autoconnect yes connection.autoconnect-priority "$priority" 2>/dev/null || true
+    nmcli connection modify "$ssid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$pass" 2>/dev/null || true
+  else
+    nmcli connection add type wifi ifname wlan0 con-name "$ssid" ssid "$ssid" 2>/dev/null && \
+    nmcli connection modify "$ssid" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$pass" connection.autoconnect yes connection.autoconnect-priority "$priority" 2>/dev/null || true
+  fi
+}
+sync_nm_profile "$WIFI_SSID" "$WIFI_PASS" 100
+sync_nm_profile "$WIFI_SSID2" "$WIFI_PASS2" 50
+
 # Check if already connected to primary or backup SSID (skip reconnect to avoid radio disruption)
 CURRENT_SSID=$(nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes:' | cut -d: -f2)
 if [ -n "$CURRENT_SSID" ]; then
