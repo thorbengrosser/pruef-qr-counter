@@ -342,6 +342,16 @@ def preview():
 _service_cache: dict = {}  # {name: (timestamp, result)}
 _SERVICE_CACHE_TTL = 5.0   # seconds
 
+# Services the UI is allowed to restart (do not include pruf-config-server or we kill the UI)
+RESTARTABLE_SERVICES = frozenset({"pruf-display.service", "pruf-network.service"})
+
+
+def _clear_service_cache(service_name: str) -> None:
+    """Clear cache for a service so next status fetch is fresh."""
+    for key in list(_service_cache.keys()):
+        if key == service_name or key == service_name + ":full":
+            del _service_cache[key]
+
 
 def get_service_status(service_name: str) -> dict:
     """Check systemd service status with caching. Returns {active: bool, status: str}."""
@@ -428,6 +438,31 @@ def get_wifi_status() -> dict:
         return {"connected": False, "ssid": None, "state": "unknown"}
 
 
+@app.route("/api/restart-service", methods=["POST"])
+def api_restart_service():
+    """Restart a known systemd service (display or network). Returns JSON {ok, message}."""
+    name = request.args.get("service") or request.form.get("service")
+    if not name and request.is_json:
+        body = request.get_json(silent=True)
+        name = (body or {}).get("service") if body else None
+    name = (name or "").strip()
+    if not name or name not in RESTARTABLE_SERVICES:
+        return jsonify({"ok": False, "message": "Invalid or disallowed service"}), 400
+    try:
+        subprocess.run(
+            ["systemctl", "restart", name],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        _clear_service_cache(name)
+        return jsonify({"ok": True, "message": f"Restarted {name}"})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "message": "Restart timed out"}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
+
+
 @app.route("/status.json")
 def status_json():
     """JSON status endpoint for monitoring."""
@@ -509,6 +544,27 @@ STATUS_HTML = """
             font-weight: 500;
             word-break: break-all;
         }
+        .status-row-with-action {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .status-row-with-action .status-value { flex: 0 1 auto; }
+        .restart-btn {
+            flex-shrink: 0;
+            padding: 6px 12px;
+            font-size: 0.85em;
+            background: var(--surface);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .restart-btn:hover { background: rgba(74, 158, 255, 0.15); }
+        .restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -588,13 +644,14 @@ STATUS_HTML = """
         
         <div class="card">
             <h2>Services</h2>
-            <div class="status-item">
+            <div class="status-item status-row-with-action">
                 <span class="status-label">Display Service:</span>
                 <span class="status-value">
                     <span class="badge {% if display_service.get('active') %}badge-success{% else %}badge-error{% endif %}">
                         {{ 'Active' if display_service.get('active') else 'Inactive' }}
                     </span>
                 </span>
+                <button type="button" class="restart-btn" data-service="pruf-display.service" data-label="Display (rescan BLE)" data-restore="Restart (rescan BLE)" onclick="restartService(this)">Restart (rescan BLE)</button>
             </div>
             <div class="status-item">
                 <span class="status-label">Config Service:</span>
@@ -604,13 +661,14 @@ STATUS_HTML = """
                     </span>
                 </span>
             </div>
-            <div class="status-item">
+            <div class="status-item status-row-with-action">
                 <span class="status-label">Network Service:</span>
                 <span class="status-value">
                     <span class="badge {% if network_service.get('active') %}badge-success{% else %}badge-error{% endif %}">
                         {{ 'Active' if network_service.get('active') else 'Inactive' }}
                     </span>
                 </span>
+                <button type="button" class="restart-btn" data-service="pruf-network.service" data-label="Network" data-restore="Restart" onclick="restartService(this)">Restart</button>
             </div>
         </div>
         
@@ -650,7 +708,32 @@ STATUS_HTML = """
     <script>
         // Auto-refresh every 30 seconds
         setTimeout(() => location.reload(), 30000);
-        
+
+        function restartService(btn) {
+            const service = btn.dataset.service;
+            const label = btn.dataset.label || service;
+            if (!confirm('Restart ' + label + '? Displays may go dark for a few seconds.')) return;
+            btn.disabled = true;
+            btn.textContent = 'Restarting…';
+            fetch('/api/restart-service?service=' + encodeURIComponent(service), { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        btn.textContent = 'Restarted';
+                        setTimeout(() => location.reload(), 2000);
+                    } else {
+                        alert('Failed: ' + (data.message || 'Unknown error'));
+                        btn.disabled = false;
+                        btn.textContent = btn.dataset.restore || 'Restart';
+                    }
+                })
+                .catch(err => {
+                    alert('Error: ' + err.message);
+                    btn.disabled = false;
+                    btn.textContent = btn.dataset.restore || 'Restart';
+                });
+        }
+
         // Format timestamp if needed
         const timestamps = document.querySelectorAll('[data-timestamp]');
         timestamps.forEach(el => {

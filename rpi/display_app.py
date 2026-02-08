@@ -414,21 +414,34 @@ def _connect_one(addr: str):
         return (None, addr)
 
 
+# Per-device BLE connect timeout; total timeout scales so serialized connections can complete (Pi/BlueZ often does one at a time)
+BLE_CONNECT_TIMEOUT_PER_DEVICE = 18
+
+
 def connect_to_addresses(addresses: list[str]) -> list:
-    """Connect to all addresses in parallel. Returns connected clients."""
+    """Connect to all addresses in parallel. Returns connected clients.
+
+    On Pi/BlueZ, connection attempts are often serialized at the controller,
+    so we use a total timeout of N * BLE_CONNECT_TIMEOUT_PER_DEVICE to allow
+    all N devices to connect one after the other.
+    """
     if not addresses:
         return []
+    total_timeout = max(15, len(addresses) * BLE_CONNECT_TIMEOUT_PER_DEVICE)
     with PerfTimer(f"BLE connect {len(addresses)} device(s)", warn_ms=10000):
         futures = {BLE_THREAD_POOL.submit(_connect_one, addr): addr for addr in addresses}
         clients = []
         try:
-            for fut in as_completed(futures, timeout=15):
+            for fut in as_completed(futures, timeout=total_timeout):
                 client, addr = fut.result()
                 if client is not None:
                     clients.append(client)
                     log.info("Connected: %s", addr)
         except TimeoutError:
-            log.warning("BLE connect timed out after 15s")
+            log.warning(
+                "BLE connect timed out after %ds (%d device(s), %ds per device)",
+                total_timeout, len(addresses), BLE_CONNECT_TIMEOUT_PER_DEVICE,
+            )
             # Cancel remaining futures so stale threads don't hold the radio
             for fut in futures:
                 fut.cancel()
