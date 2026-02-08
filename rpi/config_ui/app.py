@@ -159,10 +159,25 @@ CONFIG_HTML = """<!DOCTYPE html>
     button[type="submit"] { margin-top: 1rem; padding: 0.6rem 1.25rem; font-size: 0.95rem; font-weight: 500; color: #1a1d21; background: var(--accent); border: none; border-radius: 6px; cursor: pointer; font-family: inherit; }
     button[type="submit"]:hover { background: var(--accent-hover); }
     button[type="submit"]:focus { outline: none; box-shadow: 0 0 0 3px rgba(91,156,245,.4); }
+    .nav-links { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .nav-links a { color: var(--accent); text-decoration: none; font-weight: 500; }
+    .nav-links a:hover { text-decoration: underline; }
+    .nav-links a.current { color: var(--muted); cursor: default; pointer-events: none; }
+    .action-buttons { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; }
+    .action-btn { display: block; width: 100%; min-height: 48px; padding: 14px 1rem; font-size: 1rem; font-weight: 500; font-family: inherit; color: var(--text); background: var(--card); border: 2px solid var(--border); border-radius: 8px; cursor: pointer; text-align: center; text-decoration: none; box-sizing: border-box; }
+    .action-btn:hover { border-color: var(--accent); background: var(--input-bg); }
+    .action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .action-btn.primary { background: var(--accent); color: #1a1d21; border-color: var(--accent); }
+    .action-btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
   </style>
 </head>
 <body>
   <div class="wrap">
+    <nav class="nav-links">
+      <a href="/" class="current">⚙️ Configuration</a>
+      <a href="/status">📊 Status</a>
+      <a href="/status.json">JSON</a>
+    </nav>
     <h1>PRÜF Counter Setup</h1>
     {% if message %}
     <p class="msg {{ 'error' if error else '' }}">{{ message }}</p>
@@ -173,6 +188,14 @@ CONFIG_HTML = """<!DOCTYPE html>
     {% if status.get('last_count') is defined and status.get('api_ok', false) %}
     <p class="msg">Last count: {{ status.last_count }}</p>
     {% endif %}
+    <fieldset>
+      <legend>Quick actions</legend>
+      <p class="label" style="margin-bottom: 0.5rem; color: var(--muted); font-size: 0.9rem;">Restart services if displays or WiFi are stuck.</p>
+      <div class="action-buttons">
+        <button type="button" class="action-btn primary" data-service="pruf-display.service" data-label="Display (rescan BLE)" data-restore="Restart display (rescan BLE)" onclick="restartService(this)">Restart display (rescan BLE)</button>
+        <button type="button" class="action-btn" data-service="pruf-network.service" data-label="Network" data-restore="Restart network" onclick="restartService(this)">Restart network</button>
+      </div>
+    </fieldset>
     <form method="post" action="">
       <fieldset>
         <legend>Primary WiFi</legend>
@@ -242,6 +265,30 @@ CONFIG_HTML = """<!DOCTYPE html>
     </fieldset>
   </div>
   <script>
+  function restartService(btn) {
+    var service = btn.dataset.service;
+    var label = btn.dataset.label || service;
+    if (!confirm('Restart ' + label + '? Displays may go dark for a few seconds.')) return;
+    btn.disabled = true;
+    btn.textContent = 'Restarting…';
+    fetch('/api/restart-service?service=' + encodeURIComponent(service), { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) {
+          btn.textContent = 'Done';
+          setTimeout(function() { location.reload(); }, 2000);
+        } else {
+          alert('Failed: ' + (data.message || 'Unknown error'));
+          btn.disabled = false;
+          btn.textContent = btn.dataset.restore || 'Restart';
+        }
+      })
+      .catch(function(err) {
+        alert('Error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = btn.dataset.restore || 'Restart';
+      });
+  }
   (function(){
     function toHex(v){ v = (v||'').replace(/^#/,''); if(v.length===3) v = v[0]+v[0]+v[1]+v[1]+v[2]+v[2]; return (v+'000000').slice(0,6).toLowerCase(); }
     function toHash(h){ h = toHex(h); return '#'+h; }
@@ -544,27 +591,6 @@ STATUS_HTML = """
             font-weight: 500;
             word-break: break-all;
         }
-        .status-row-with-action {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .status-row-with-action .status-value { flex: 0 1 auto; }
-        .restart-btn {
-            flex-shrink: 0;
-            padding: 6px 12px;
-            font-size: 0.85em;
-            background: var(--surface);
-            color: var(--accent);
-            border: 1px solid var(--accent);
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-        }
-        .restart-btn:hover { background: rgba(74, 158, 255, 0.15); }
-        .restart-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -590,10 +616,19 @@ STATUS_HTML = """
         .auto-refresh { color: var(--text-dim); font-size: 0.9em; margin-top: 10px; }
         .error-text { color: var(--error); }
         .success-text { color: var(--success); }
+        .nav-links { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .nav-links a { color: var(--accent); text-decoration: none; font-weight: 500; }
+        .nav-links a:hover { text-decoration: underline; }
+        .nav-links a.current { color: var(--text-dim); cursor: default; pointer-events: none; }
     </style>
 </head>
 <body>
     <div class="container">
+        <nav class="nav-links" style="margin-bottom: 1rem;">
+            <a href="/">⚙️ Configuration</a>
+            <a href="/status" class="current">📊 Status</a>
+            <a href="/status.json">JSON</a>
+        </nav>
         <h1>PRÜF Counter Status</h1>
         <button class="refresh-btn" onclick="location.reload()">🔄 Refresh</button>
         <div class="auto-refresh">Auto-refreshes every 30 seconds</div>
@@ -644,14 +679,13 @@ STATUS_HTML = """
         
         <div class="card">
             <h2>Services</h2>
-            <div class="status-item status-row-with-action">
+            <div class="status-item">
                 <span class="status-label">Display Service:</span>
                 <span class="status-value">
                     <span class="badge {% if display_service.get('active') %}badge-success{% else %}badge-error{% endif %}">
                         {{ 'Active' if display_service.get('active') else 'Inactive' }}
                     </span>
                 </span>
-                <button type="button" class="restart-btn" data-service="pruf-display.service" data-label="Display (rescan BLE)" data-restore="Restart (rescan BLE)" onclick="restartService(this)">Restart (rescan BLE)</button>
             </div>
             <div class="status-item">
                 <span class="status-label">Config Service:</span>
@@ -661,14 +695,13 @@ STATUS_HTML = """
                     </span>
                 </span>
             </div>
-            <div class="status-item status-row-with-action">
+            <div class="status-item">
                 <span class="status-label">Network Service:</span>
                 <span class="status-value">
                     <span class="badge {% if network_service.get('active') %}badge-success{% else %}badge-error{% endif %}">
                         {{ 'Active' if network_service.get('active') else 'Inactive' }}
                     </span>
                 </span>
-                <button type="button" class="restart-btn" data-service="pruf-network.service" data-label="Network" data-restore="Restart" onclick="restartService(this)">Restart</button>
             </div>
         </div>
         
@@ -698,41 +731,16 @@ STATUS_HTML = """
         
         <div class="card">
             <h2>Quick Links</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <a href="/" style="color: var(--accent); text-decoration: none;">⚙️ Configuration</a>
-                <a href="/status.json" style="color: var(--accent); text-decoration: none;">📊 JSON Status</a>
-            </div>
+            <nav class="nav-links">
+                <a href="/">⚙️ Configuration</a>
+                <a href="/status.json">📊 JSON Status</a>
+            </nav>
         </div>
     </div>
     
     <script>
         // Auto-refresh every 30 seconds
         setTimeout(() => location.reload(), 30000);
-
-        function restartService(btn) {
-            const service = btn.dataset.service;
-            const label = btn.dataset.label || service;
-            if (!confirm('Restart ' + label + '? Displays may go dark for a few seconds.')) return;
-            btn.disabled = true;
-            btn.textContent = 'Restarting…';
-            fetch('/api/restart-service?service=' + encodeURIComponent(service), { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.ok) {
-                        btn.textContent = 'Restarted';
-                        setTimeout(() => location.reload(), 2000);
-                    } else {
-                        alert('Failed: ' + (data.message || 'Unknown error'));
-                        btn.disabled = false;
-                        btn.textContent = btn.dataset.restore || 'Restart';
-                    }
-                })
-                .catch(err => {
-                    alert('Error: ' + err.message);
-                    btn.disabled = false;
-                    btn.textContent = btn.dataset.restore || 'Restart';
-                });
-        }
 
         // Format timestamp if needed
         const timestamps = document.querySelectorAll('[data-timestamp]');

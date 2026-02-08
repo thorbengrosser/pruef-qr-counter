@@ -111,9 +111,10 @@ After that, `git pull` will always keep your local `rpi/config.json`. To undo la
 - `run_local.sh` — Run config UI or display daemon locally for testing (see “Local testing” above)
 - `install.sh` — One-time install script (deps, venv, hostapd, dnsmasq, Avahi, systemd)
 - `requirements.txt` — Python deps (pypixelcolor, bleak, Pillow, requests, Flask)
-- `config.json` — Default/example config (overwritten on first save from UI)
+- `config.json.example` — Example config (copy to `config.json` or let install/UI create it)
+- `config.json` — Live config (WiFi, API URL, display options); in `.gitignore`, created by UI or install
 - `display_app.py` — Display daemon (API poll, render, BLE send, multi-display, reconnect)
-- `config_ui/` — Flask config server (form GET/POST, write config, restart display service)
+- `config_ui/` — Flask config server (form, Status page, Quick actions: restart display/network)
 - `fonts/` — Optional TTF/OTF (e.g. **Kario39C3Var-Roman.ttf**); add from `../testing/` or document in README
 - `network/` — Scripts for NetworkManager (nmcli): start AP, connect STA, primary/backup failover
 
@@ -127,7 +128,7 @@ When you're away from the Pi, you can monitor its status remotely:
   - Shows display status (last count, API status, BLE connections)
   - Shows systemd service status (display, config, network)
   - Shows WiFi connection status
-  - Auto-refreshes every 10 seconds
+  - Auto-refreshes every 30 seconds
 
 - **JSON API**: **http://pruf.local/status.json** for programmatic access
   - Returns JSON with all status information
@@ -144,32 +145,32 @@ ssh pi@pruf.local
 ssh pi@<pi-ip-address>
 ```
 
-**Check logs**:
+**Check logs** (services run as system units, use `sudo`):
 ```bash
 # Display daemon logs
-journalctl --user -u pruf-display.service -f
+sudo journalctl -u pruf-display.service -f
 
 # Config server logs
-journalctl --user -u pruf-config-server.service -f
+sudo journalctl -u pruf-config-server.service -f
 
 # Network service logs
-journalctl --user -u pruf-network.service -f
+sudo journalctl -u pruf-network.service -f
 
 # All PRÜF services
-journalctl --user -u pruf-*.service -f
+sudo journalctl -u pruf-*.service -f
 ```
 
 **Check service status**:
 ```bash
-systemctl --user status pruf-display.service
-systemctl --user status pruf-config-server.service
-systemctl --user status pruf-network.service
+sudo systemctl status pruf-display.service
+sudo systemctl status pruf-config-server.service
+sudo systemctl status pruf-network.service
 ```
 
-**Restart services**:
+**Restart services** (or use the **Configuration** page → Quick actions: “Restart display (rescan BLE)” / “Restart network”):
 ```bash
-systemctl --user restart pruf-display.service
-systemctl --user restart pruf-config-server.service
+sudo systemctl restart pruf-display.service
+sudo systemctl restart pruf-network.service
 ```
 
 **Check WiFi status**:
@@ -205,5 +206,6 @@ cat ~/pruef_counter/rpi/status.json
 
 - `pruf-display.service` — Runs `display_app.py`; restart on failure.
 - `pruf-config-server.service` — Serves the Flask config UI (both in AP and STA mode).
+- `pruf-network.service` — Network state (WiFi try primary/backup, AP fallback after failures).
 
-Use `sudo systemctl status pruf-display pruf-config-server` to check status.
+Use `sudo systemctl status pruf-display pruf-config-server pruf-network` to check status.

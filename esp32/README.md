@@ -22,8 +22,9 @@ ESP32 firmware for a portable display that shows the live counter from the web A
 
 ## Setup
 
-1. **Generate PNG frames** (uses Kario font from `../testing/`):
+1. **Generate PNG frames** (requires a TTF font; script defaults to `testing/Kario39C3Var-Roman.ttf` from repo root):
    ```bash
+   # From repo root. If you don't have testing/, put a 64×16-suitable font (e.g. Kario) in esp32/tools/ and edit FONT_PATH in the script.
    python esp32/tools/generate_pngs.py [--flash-text-color RRGGBB] [--flash-bg-color RRGGBB]
    ```
 
@@ -76,4 +77,4 @@ esp32/
 - **BLE**: `LED_BLE_*` devices, UUID `0000fa02-...`
 - **Image**: PIL-encoded PNG bytes
 - **API**: `GET &lt;api_url&gt;` → `{ "count": N, "epoch": ... }`
-- [ ] BLE auto-reconnect
+- BLE rescans and reconnects if display is lost.

@@ -76,15 +76,10 @@ Any mistakes or regressions are of course mine, not theirs.
 
 ## License
 
-You are free to **use, copy, modify, and redistribute** this project, including for commercial purposes, **without attribution**, under the following conditions:
+This project is licensed under the terms in **[LICENSE](LICENSE)**. In short:
 
-1. **No law-enforcement or military use**  
-   You may not use this software, or modified versions of it, for the benefit of:
-   - law-enforcement agencies,
-   - military or defence organisations,
-   - or protests, campaigns, or advocacy in favour of such organisations.
+- You may **use, copy, modify, and redistribute** it, including for commercial use.
+- **No law-enforcement or military use** — see the LICENSE file for the exact restriction.
+- **No warranty** — provided “as is”.
 
-2. **No warranty / no liability**  
-   The software is provided “as is”, without any warranty of any kind; the author(s) are not liable for any damages arising from its use.
-
-Informally, you can think of this as “MIT-style permissions, but with an explicit prohibition on law‑enforcement / defence use.” If these constraints are incompatible with your context, please vibe code your own.
+If these terms are incompatible with your context, you are free to use the ideas and implement your own.
