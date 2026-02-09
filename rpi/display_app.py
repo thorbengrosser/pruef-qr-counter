@@ -464,7 +464,9 @@ def fetch_count(api_url: str) -> int | None:
     global _last_api_error
     try:
         with PerfTimer("API poll", warn_ms=1500):
-            r = _get_session().get(api_url, timeout=6)
+            # Split timeout: (connect, read). Short connect timeout frees the
+            # shared WiFi/BLE radio faster on Pi Zero 2 W when WiFi is flaky.
+            r = _get_session().get(api_url, timeout=(2, 4))
             r.raise_for_status()
         if _last_api_error:
             log.info("API recovered (was: %s)", _last_api_error[:80])
