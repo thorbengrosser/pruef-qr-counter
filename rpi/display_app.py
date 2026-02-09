@@ -531,14 +531,28 @@ def connect_to_addresses(addresses: list[str]) -> list:
     return clients
 
 
-def _send_one(client, path: str, slot: int):
-    """Send image to a single client. Returns (client, success)."""
+def _save_one(client, path: str, slot: int):
+    """Transfer image to a display's slot without showing. Returns (client, success)."""
     try:
         client.send_image(path, save_slot=slot)
+        return (client, True)
+    except Exception as e:
+        log.warning("Display save failed (%s): %s",
+                    getattr(client, "address", "?"), e)
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+        return (client, False)
+
+
+def _show_one(client, slot: int):
+    """Trigger slot display on one client. Returns (client, success)."""
+    try:
         client.show_slot(slot)
         return (client, True)
     except Exception as e:
-        log.warning("Display send failed (%s): %s",
+        log.warning("Display show failed (%s): %s",
                     getattr(client, "address", "?"), e)
         try:
             client.disconnect()
@@ -548,23 +562,46 @@ def _send_one(client, path: str, slot: int):
 
 
 def send_image_to_clients(clients: list, path: str, cleanup: bool = True) -> list:
-    """Send image to all clients in parallel. Returns working clients."""
+    """Send image to all clients with synchronized display update.
+
+    Two-phase approach for visual sync across multiple displays:
+    1. Transfer image data to all displays in parallel (slow, 1-3s each)
+    2. Trigger show_slot on all displays in parallel (fast, <0.2s each)
+    This ensures all displays flip at nearly the same time.
+    """
     if not clients:
         if cleanup:
             _cleanup_file(path)
         return []
-    with PerfTimer(f"BLE send to {len(clients)} display(s)"):
-        futures = {BLE_THREAD_POOL.submit(_send_one, c, path, DISPLAY_SLOT): c for c in clients}
-        working = []
+
+    # Phase 1: Save image data to all displays (parallel, slow)
+    with PerfTimer(f"BLE save to {len(clients)} display(s)"):
+        futures = {BLE_THREAD_POOL.submit(_save_one, c, path, DISPLAY_SLOT): c for c in clients}
+        ready = []
         try:
             for fut in as_completed(futures, timeout=15):
                 client, ok = fut.result()
                 if ok:
-                    working.append(client)
+                    ready.append(client)
         except TimeoutError:
-            log.warning("BLE send timed out after 15s")
+            log.warning("BLE save timed out after 15s")
             for fut in futures:
                 fut.cancel()
+
+    # Phase 2: Show slot on all displays (parallel, fast — near-simultaneous flip)
+    working = []
+    if ready:
+        futures = {BLE_THREAD_POOL.submit(_show_one, c, DISPLAY_SLOT): c for c in ready}
+        try:
+            for fut in as_completed(futures, timeout=5):
+                client, ok = fut.result()
+                if ok:
+                    working.append(client)
+        except TimeoutError:
+            log.warning("BLE show timed out after 5s")
+            for fut in futures:
+                fut.cancel()
+
     if cleanup:
         _cleanup_file(path)
     return working
@@ -971,7 +1008,11 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
             if elapsed > dcfg.poll_interval * 2:
                 log.warning("Loop iteration slow: %.0fms (target: %.0fms)",
                             elapsed * 1000, dcfg.poll_interval * 1000)
-            time.sleep(sleep_time)
+            # Sleep in small chunks so SIGTERM is honoured within ~0.25s
+            while sleep_time > 0 and not _shutdown:
+                chunk = min(0.25, sleep_time)
+                time.sleep(chunk)
+                sleep_time -= chunk
 
     except KeyboardInterrupt:
         log.info("Stopped (KeyboardInterrupt)")
