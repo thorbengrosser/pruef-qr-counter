@@ -15,8 +15,10 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -90,7 +92,10 @@ BLE_THREAD_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ble")
 BACKOFF_MIN_SEC = 3.0
 BACKOFF_MAX_SEC = 30.0           # capped at 30s (was 60s) — don't give up on known devices too long
 BACKOFF_FAST_RETRIES = 5         # first N retries stay at min backoff (was 3)
-BT_RESET_AFTER_FAILURES = 8     # reset BT adapter after this many consecutive scan failures
+BT_RESET_AFTER_FAILURES = 3     # reset BT adapter after this many consecutive scan failures (was 8)
+
+# Module-level shutdown event for clean SIGTERM handling across threads
+_shutdown_event = threading.Event()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -297,6 +302,64 @@ def _cleanup_file(path: str) -> None:
         pass
 
 
+# ── Persistent BLE event loop ─────────────────────────────────────────
+# On Pi Zero 2 W, asyncio.run() creates+destroys D-Bus connections each call.
+# Teardown can take 60-80s on the Pi's slow CPU, causing massive delays between
+# scan retries. A persistent event loop keeps D-Bus connections alive.
+
+_ble_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_ble_loop() -> asyncio.AbstractEventLoop:
+    """Get or create a persistent asyncio event loop for BLE operations."""
+    global _ble_loop
+    if _ble_loop is None or _ble_loop.is_closed():
+        _ble_loop = asyncio.new_event_loop()
+    return _ble_loop
+
+
+def _run_ble_async(coro):
+    """Run a BLE async operation on the persistent event loop."""
+    return _get_ble_loop().run_until_complete(coro)
+
+
+def _close_ble_loop() -> None:
+    """Close the persistent BLE loop (e.g. after adapter reset)."""
+    global _ble_loop
+    if _ble_loop is not None and not _ble_loop.is_closed():
+        try:
+            _ble_loop.close()
+        except Exception:
+            pass
+    _ble_loop = None
+
+
+# ── BlueZ cache management ───────────────────────────────────────────
+
+
+def clear_bluez_cache(addresses: list[str] | None = None) -> None:
+    """Remove devices from BlueZ cache to force fresh discovery.
+
+    When a BLE device is power-cycled, BlueZ retains stale cache entries that
+    cause 'Device not found' errors. Removing forces a fresh discovery.
+    """
+    try:
+        if addresses:
+            for addr in addresses:
+                subprocess.run(["bluetoothctl", "remove", addr],
+                               timeout=3, capture_output=True, check=False)
+        else:
+            result = subprocess.run(["bluetoothctl", "devices"],
+                                    timeout=5, capture_output=True, text=True, check=False)
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    subprocess.run(["bluetoothctl", "remove", parts[1]],
+                                   timeout=3, capture_output=True, check=False)
+    except Exception as e:
+        log.debug("clear_bluez_cache: %s", e)
+
+
 # ── BLE ───────────────────────────────────────────────────────────────
 
 
@@ -314,12 +377,19 @@ def robust_scan(timeout: float = 10.0, retries: int = 3) -> list[tuple[str, str]
 
     On the Pi Zero 2 W the shared WiFi/BLE radio makes scanning unreliable.
     A longer scan window (10s vs 5s) and multiple attempts greatly improve
-    discovery rate. Between retries we sleep briefly to let the radio settle.
+    discovery rate. Uses a persistent event loop to avoid 60-80s D-Bus
+    teardown/rebuild delays between retries.
     """
     best: list[tuple[str, str]] = []
     for attempt in range(1, retries + 1):
+        if _shutdown_event.is_set():
+            break
         with PerfTimer(f"BLE scan attempt {attempt}/{retries}"):
-            found = asyncio.run(scan_led_devices(timeout=timeout))
+            try:
+                found = _run_ble_async(scan_led_devices(timeout=timeout))
+            except Exception as e:
+                log.warning("Scan %d/%d failed: %s", attempt, retries, e)
+                found = []
         # Keep the result with the most devices
         if len(found) > len(best):
             best = found
@@ -337,17 +407,31 @@ def robust_scan(timeout: float = 10.0, retries: int = 3) -> list[tuple[str, str]
     return best
 
 
-def reset_bluetooth_adapter() -> None:
-    """Reset the HCI Bluetooth adapter. Helps when repeated scans find nothing.
+def reset_bluetooth_adapter(full: bool = False) -> None:
+    """Reset the HCI Bluetooth adapter.
 
-    On Pi Zero 2 W the adapter sometimes gets wedged after prolonged use.
+    full=False: soft reset (hciconfig reset) — minor glitches.
+    full=True: hard reset (down/up + clear device cache + new event loop) —
+               needed at startup and after SIGKILL leaves the adapter wedged.
     """
-    import subprocess
     try:
-        log.info("Resetting Bluetooth adapter (hci0)...")
-        subprocess.run(["hciconfig", "hci0", "reset"], timeout=5,
-                        capture_output=True, check=False)
-        time.sleep(2)
+        if full:
+            log.info("Full Bluetooth adapter reset (hci0 down/up + clear cache)...")
+            _close_ble_loop()
+            subprocess.run(["hciconfig", "hci0", "down"], timeout=5,
+                           capture_output=True, check=False)
+            time.sleep(1)
+            subprocess.run(["hciconfig", "hci0", "up"], timeout=5,
+                           capture_output=True, check=False)
+            time.sleep(2)
+            clear_bluez_cache()
+            log.info("Bluetooth adapter reset complete.")
+        else:
+            log.info("Resetting Bluetooth adapter (hci0)...")
+            _close_ble_loop()
+            subprocess.run(["hciconfig", "hci0", "reset"], timeout=5,
+                           capture_output=True, check=False)
+            time.sleep(2)
     except Exception as e:
         log.debug("BT adapter reset: %s", e)
 
@@ -419,32 +503,31 @@ BLE_CONNECT_TIMEOUT_PER_DEVICE = 18
 
 
 def connect_to_addresses(addresses: list[str]) -> list:
-    """Connect to all addresses in parallel. Returns connected clients.
+    """Connect to addresses sequentially with per-device timeout.
 
-    On Pi/BlueZ, connection attempts are often serialized at the controller,
-    so we use a total timeout of N * BLE_CONNECT_TIMEOUT_PER_DEVICE to allow
-    all N devices to connect one after the other.
+    On Pi Zero 2 W the single BLE radio serializes connections at the
+    controller level. Sequential connection with individual timeouts is more
+    reliable than parallel: each device gets a fair shot at the radio, and
+    failures are detected faster instead of burning the entire global timeout.
     """
     if not addresses:
         return []
-    total_timeout = max(15, len(addresses) * BLE_CONNECT_TIMEOUT_PER_DEVICE)
+    clients = []
     with PerfTimer(f"BLE connect {len(addresses)} device(s)", warn_ms=10000):
-        futures = {BLE_THREAD_POOL.submit(_connect_one, addr): addr for addr in addresses}
-        clients = []
-        try:
-            for fut in as_completed(futures, timeout=total_timeout):
-                client, addr = fut.result()
+        for addr in addresses:
+            if _shutdown_event.is_set():
+                break
+            fut = BLE_THREAD_POOL.submit(_connect_one, addr)
+            try:
+                client, _ = fut.result(timeout=BLE_CONNECT_TIMEOUT_PER_DEVICE)
                 if client is not None:
                     clients.append(client)
                     log.info("Connected: %s", addr)
-        except TimeoutError:
-            log.warning(
-                "BLE connect timed out after %ds (%d device(s), %ds per device)",
-                total_timeout, len(addresses), BLE_CONNECT_TIMEOUT_PER_DEVICE,
-            )
-            # Cancel remaining futures so stale threads don't hold the radio
-            for fut in futures:
+            except TimeoutError:
+                log.warning("Connect %s timed out after %ds", addr, BLE_CONNECT_TIMEOUT_PER_DEVICE)
                 fut.cancel()
+            except Exception as e:
+                log.warning("Connect %s error: %s", addr, e)
     return clients
 
 
@@ -534,6 +617,9 @@ class ReconnectState:
 
     def maybe_reconnect(self, clients: list) -> list:
         """Called after every send. Reconnects dropped clients if needed."""
+        if _shutdown_event.is_set():
+            return clients
+
         # All connected? Nothing to do.
         if len(clients) >= len(self.addresses):
             self._reset_backoff()
@@ -559,20 +645,26 @@ class ReconnectState:
                 self._reset_backoff()
                 return clients
 
+        if _shutdown_event.is_set():
+            return clients
+
         # Step 2: Known-address reconnect didn't get all — scan if auto
         if self.is_auto:
-            still_missing = len(self.addresses) - len(clients)
-            log.info("Still missing %d display(s); scanning...", still_missing)
-            found = robust_scan(timeout=8.0, retries=2)
-            new_addrs = [addr for _name, addr in found]
-            if new_addrs:
-                # Update address list (devices may have changed BLE address)
-                self.addresses = list(set(self.addresses) | set(new_addrs))
-                connected = self._connected_addresses(clients)
-                scan_missing = [a for a in new_addrs if a not in connected]
-                if scan_missing:
-                    scan_clients = connect_to_addresses(scan_missing)
-                    clients.extend(scan_clients)
+            still_missing = self._missing_addresses(clients)
+            if still_missing:
+                # Clear stale BlueZ cache for failing addresses before re-scanning
+                clear_bluez_cache(still_missing)
+                log.info("Still missing %d display(s); scanning...", len(still_missing))
+                found = robust_scan(timeout=8.0, retries=2)
+                new_addrs = [addr for _name, addr in found]
+                if new_addrs:
+                    # Update address list (devices may have changed BLE address)
+                    self.addresses = list(set(self.addresses) | set(new_addrs))
+                    connected = self._connected_addresses(clients)
+                    scan_missing = [a for a in new_addrs if a not in connected]
+                    if scan_missing:
+                        scan_clients = connect_to_addresses(scan_missing)
+                        clients.extend(scan_clients)
 
         if len(clients) >= len(self.addresses):
             self._reset_backoff()
@@ -585,6 +677,8 @@ class ReconnectState:
 
     def force_reconnect(self, clients: list) -> list:
         """Called when all clients are gone. Same logic but always tries."""
+        if _shutdown_event.is_set():
+            return clients
         if clients:
             return clients
         if not self._cooldown_elapsed():
@@ -594,7 +688,7 @@ class ReconnectState:
             self.last_attempt = time.monotonic()
             # Reset BT adapter if we've been failing for a while
             if self.consecutive_failures >= BT_RESET_AFTER_FAILURES:
-                reset_bluetooth_adapter()
+                reset_bluetooth_adapter(full=True)
             log.info("Scanning for LED_BLE_* devices...")
             found = robust_scan(timeout=10.0, retries=3)
             self.addresses = [addr for _name, addr in found]
@@ -694,6 +788,11 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
         def force_reconnect(c: list) -> list:
             return c
     else:
+        # Full Bluetooth adapter reset at startup — clears stale state from
+        # previous SIGKILL or wedged adapter. This single step prevents the
+        # 4+ minute "no devices found" loops seen after dirty shutdowns.
+        reset_bluetooth_adapter(full=True)
+
         addresses, is_auto = resolve_device_addresses(cfg)
         if not addresses:
             log.warning("No devices found yet. Will keep retrying...")
@@ -734,6 +833,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
         nonlocal _shutdown
         log.info("Received SIGTERM, shutting down...")
         _shutdown = True
+        _shutdown_event.set()
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
@@ -880,6 +980,7 @@ def run_display_loop(config_path: str | None = None, dry_run: bool = False) -> N
     finally:
         if not dry_run:
             disconnect_all(clients)
+        _close_ble_loop()
         BLE_THREAD_POOL.shutdown(wait=False)
 
 
