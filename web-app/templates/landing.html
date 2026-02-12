@@ -1,24 +1,125 @@
 {% extends "base.html" %}
 {% block title %}Prüfstelle — PRÜF QR{% endblock %}
 {% block content %}
-  <div class="start-screen">
+  <div class="start-screen" id="autofill-screen">
     <p class="eingang-timestamp" id="eingang-timestamp" aria-hidden="true">EINGANG: —</p>
-    <h1>Vorgang eingeleitet. Die Überprüfung der verfassungsmäßigen Unbedenklichkeit des vorliegenden QR-Codes wurde initiiert.</h1>
+    <h1>Vorgang eingeleitet</h1>
+    <p class="subtitle">Die Überprüfung wurde initiiert.</p>
     <p class="lede">Bitte reichen Sie den entsprechenden Antrag zur weiteren Bearbeitung ein.</p>
+    <div class="form" style="margin-top: 14px;">
+      <div class="row">
+        <div class="k">Antragsteller*in</div>
+        <div class="v" id="af-v1">&nbsp;</div>
+      </div>
+      <div class="row">
+        <div class="k">Anliegen</div>
+        <div class="v" id="af-v2">&nbsp;</div>
+      </div>
+      <div class="row">
+        <div class="k">Begründung</div>
+        <div class="v" id="af-v3"><span id="af-tw"></span><span class="af-cursor" id="af-cursor" aria-hidden="true">&#9612;</span><div class="af-aside" id="af-aside"></div></div>
+      </div>
+    </div>
     <div class="actions">
-      <a href="{{ url_for('main.form') }}" class="btn primary">Antrag einreichen</a>
+      <a href="{{ url_for('main.form') }}" class="btn primary" id="af-cta">Antrag einreichen</a>
+      <button type="button" class="af-skip">Überspringen</button>
     </div>
   </div>
 {% endblock %}
 {% block scripts %}
   <script>
-    (function () {
-      var el = document.getElementById('eingang-timestamp');
-      if (!el) return;
+  (function () {
+    var DEST = document.getElementById('af-cta').getAttribute('href');
+    var prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var done = false;
+    var timers = [];
+
+    function schedule(fn, ms) {
+      var id = setTimeout(fn, ms);
+      timers.push(id);
+      return id;
+    }
+
+    function cleanup() {
+      for (var i = 0; i < timers.length; i++) {
+        clearTimeout(timers[i]);
+        clearInterval(timers[i]);
+      }
+    }
+
+    function go() {
+      if (done) return;
+      done = true;
+      cleanup();
+      window.location.replace(DEST);
+    }
+
+    /* Timestamp */
+    var tsEl = document.getElementById('eingang-timestamp');
+    if (tsEl) {
       var now = new Date();
-      var date = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
-      var time = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
-      el.textContent = 'EINGANG: ' + date + ' | ' + time;
-    })();
+      tsEl.textContent = 'EINGANG: ' + now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + ' | ' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0') + ':' +
+        String(now.getSeconds()).padStart(2, '0');
+    }
+
+    var v1 = document.getElementById('af-v1');
+    var v2 = document.getElementById('af-v2');
+    var tw = document.getElementById('af-tw');
+    var cursor = document.getElementById('af-cursor');
+    var aside = document.getElementById('af-aside');
+    var cta = document.getElementById('af-cta');
+
+    /* Click / tap anywhere in the content area skips to /form */
+    document.getElementById('autofill-screen').addEventListener('click', go);
+
+    /* Reduced motion: show final state, navigate after short delay */
+    if (prefersReduced) {
+      v1.textContent = 'Bürger*in (m/w/d)';
+      v2.textContent = 'Prüfung eines QR-Codes';
+      tw.textContent = 'Weil alles Ordnung haben muss';
+      cursor.style.display = 'none';
+      aside.textContent = 'Auch hier.';
+      schedule(go, 700);
+      return;
+    }
+
+    /* --- Animated sequence (~2.7 s total) --- */
+    cursor.style.display = 'none';
+
+    /* Row 1 — instant at 200 ms */
+    schedule(function () { v1.textContent = 'Bürger*in (m/w/d)'; }, 200);
+
+    /* Row 2 — instant at 500 ms */
+    schedule(function () { v2.textContent = 'Prüfung eines QR-Codes'; }, 500);
+
+    /* Row 3 — typewriter starting at 700 ms (29 chars × 50 ms = 1 450 ms → ends ~2 150 ms) */
+    var text = 'Weil alles Ordnung haben muss';
+    var ci = 0;
+
+    schedule(function () {
+      cursor.style.display = '';
+      var iv = setInterval(function () {
+        if (done) { clearInterval(iv); return; }
+        tw.textContent += text[ci++];
+        if (ci >= text.length) {
+          clearInterval(iv);
+          cursor.style.display = 'none';
+          /* +100 ms → "Auch hier." */
+          schedule(function () { aside.textContent = 'Auch hier.'; }, 100);
+          /* +200 ms → CTA pulse */
+          schedule(function () { cta.classList.add('af-pulse'); }, 200);
+          /* +550 ms → auto-navigate */
+          schedule(go, 550);
+        }
+      }, 50);
+      timers.push(iv);
+    }, 700);
+
+    window.addEventListener('pagehide', cleanup);
+  })();
   </script>
 {% endblock %}
