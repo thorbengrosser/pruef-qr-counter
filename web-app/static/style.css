@@ -25,6 +25,11 @@
   --mono: ui-monospace, "Courier New", Courier, monospace;
   --lcd-font: "LCD14", var(--mono);
   --radius: 0px;
+  /* Valentine campaign (Was nun? primary CTA only) */
+  --valentine-purple: #8E7AF5;
+  --valentine-pink: #C2185B;
+  --valentine-pink-hover: #a01449;
+  --valentine-soft-bg: rgba(142, 122, 245, 0.08);
 }
 
 .demo {
@@ -632,24 +637,90 @@ h1, h2 {
   line-height: 1.3;
 }
 
-/* Was nun? — larger CTAs, label + sublabel */
+/* Was nun? — CTAs: primary Valentine, then secondary */
+.valentine-highlight {
+  background: var(--valentine-soft-bg);
+  padding: 18px;
+  border-radius: 12px;
+  margin-top: 20px;
+  margin-bottom: 18px;
+}
+
+.valentine-highlight .info-links {
+  margin-top: 0;
+}
+
+.valentine-highlight + .secondary-group {
+  margin-top: 12px;
+}
+
+.secondary-group .info-links {
+  margin-top: 0;
+  gap: 6px;
+}
+
 .info-links {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   margin-top: 20px;
 }
 
 .info-links .btn {
   text-align: center;
-  padding: 18px 20px;
-  font-size: 1.05rem;
+  width: 100%;
   min-height: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+/* Primary: Valentine CTA — rounded, soft shadow, more human typography */
+.info-links .btn.cta-valentine {
+  padding: 18px 20px;
+  font-size: 1.12rem;
+  border-radius: 6px;
+  background: var(--valentine-pink);
+  color: #fff;
+  border: 1px solid rgba(120, 20, 60, 0.5);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.info-links .btn.cta-valentine:hover {
+  background: var(--valentine-pink-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.info-links .btn.cta-valentine .cta-label {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.info-links .btn.cta-valentine .cta-sublabel {
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  opacity: 0.92;
+}
+
+/* Secondary CTAs — reduced size and visual weight, cleaner rhythm */
+.info-links .btn.cta-pruef,
+.info-links .btn.cta-spenden,
+.info-links .btn.cta-stand {
+  padding: 12px 16px;
+  min-height: 48px;
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 rgba(13, 13, 13, 0.18);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
 }
 
 .info-links .cta-label {
@@ -657,52 +728,87 @@ h1, h2 {
 }
 
 .info-links .cta-sublabel {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.04em;
-  opacity: 0.9;
+  opacity: 0.88;
 }
 
-/* Was nun?: only the progression CTA (Zu PRÜF) uses orange when .primary is added */
-.info-links .btn.primary.cta-pruef,
 .info-links .btn.cta-pruef {
   background: var(--aktenmarker-orange);
   color: var(--paper-white);
-  border: 1px solid rgba(13, 13, 13, 0.35);
-  box-shadow: 3px 3px 0 rgba(13, 13, 13, 0.55);
+  border: 1px solid rgba(13, 13, 13, 0.3);
 }
 
-.info-links .btn.primary.cta-pruef:hover,
 .info-links .btn.cta-pruef:hover {
   background: var(--aktenmarker-orange-hover);
-  transform: translate(-2px, -2px);
-  box-shadow: 5px 5px 0 rgba(13, 13, 13, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 1px 2px 0 rgba(13, 13, 13, 0.22);
 }
 
 .info-links .btn.cta-spenden {
-  background: rgba(139, 119, 101, 0.35);
+  background: rgba(139, 119, 101, 0.3);
   color: var(--pure-black);
-  border: 1px solid rgba(115, 113, 81, 0.5);
-  box-shadow: 2px 2px 0 rgba(13, 13, 13, 0.35);
+  border: 1px solid rgba(115, 113, 81, 0.4);
 }
 
 .info-links .btn.cta-spenden:hover {
-  background: rgba(139, 119, 101, 0.5);
-  transform: translate(-2px, -2px);
-  box-shadow: 3px 3px 0 var(--shadow-green);
+  background: rgba(139, 119, 101, 0.45);
+  transform: translateY(-1px);
+  box-shadow: 1px 2px 0 rgba(13, 13, 13, 0.16);
 }
 
 .info-links .btn.cta-stand {
-  background: rgba(115, 113, 81, 0.25);
+  background: rgba(115, 113, 81, 0.22);
   color: var(--pure-black);
-  border: 1px solid rgba(13, 13, 13, 0.25);
-  box-shadow: 2px 2px 0 rgba(13, 13, 13, 0.3);
+  border: 1px solid rgba(13, 13, 13, 0.2);
 }
 
 .info-links .btn.cta-stand:hover {
-  background: rgba(115, 113, 81, 0.4);
-  transform: translate(-2px, -2px);
-  box-shadow: 3px 3px 0 var(--shadow-green);
+  background: rgba(115, 113, 81, 0.35);
+  transform: translateY(-1px);
+  box-shadow: 1px 2px 0 rgba(13, 13, 13, 0.16);
+}
+
+/* Was nun? — tertiary “Weitere Prüfung” (optional procedural action) */
+.actions--info {
+  margin-top: 10px;
+  gap: 8px;
+  flex-direction: column;
+}
+
+.actions--info .btn.cta-tertiary {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.btn.cta-tertiary {
+  background: rgba(27, 64, 36, 0.14);
+  border: 1px solid rgba(27, 64, 36, 0.45);
+  box-shadow: none;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  min-height: 0;
+  color: var(--deep-green);
+  font-weight: 700;
+  box-sizing: border-box;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.btn.cta-tertiary:hover {
+  background: rgba(27, 64, 36, 0.2);
+  transform: none;
+  box-shadow: none;
+}
+
+.paper.info-page .legal {
+  margin-top: 6px;
+  opacity: 0.78;
 }
 
 /* Widerspruch result — reveal lines one by one */

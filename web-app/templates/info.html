@@ -1,13 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Was nun? — PRÜF QR{% endblock %}
+{% block page_class %}info-page{% endblock %}
 {% block content %}
   <h1>Was nun?</h1>
-  <div class="info-links">
-    <a href="https://pruef-demos.de/" class="btn cta-pruef" target="_blank" rel="noopener noreferrer"><span class="cta-label">Zu PRÜF</span><span class="cta-sublabel">Über die Aktion</span></a>
-    <a href="https://verein.innn.it/spendenaktion/" class="btn cta-spenden" target="_blank" rel="noopener noreferrer"><span class="cta-label">Spenden</span><span class="cta-sublabel">Aktion unterstützen</span></a>
-    <a href="https://pruef-stand.de/" class="btn cta-stand" target="_blank" rel="noopener noreferrer"><span class="cta-label">PRÜF-Stand</span><span class="cta-sublabel">Aktuelle Verhältnisse im Bundesrat</span></a>
+  <div class="valentine-highlight">
+    <div class="info-links info-links--primary">
+      <a href="https://brief.pruef-demos.de" class="btn cta-valentine" target="_blank" rel="noopener noreferrer"><span class="cta-label">Liebesbrief schreiben</span><span class="cta-sublabel">Dein Demokratie-Liebesbrief zum Valentinstag</span></a>
+    </div>
+  </div>
+  <div class="secondary-group">
+    <div class="info-links">
+      <a href="https://pruef-demos.de/" class="btn cta-pruef" target="_blank" rel="noopener noreferrer"><span class="cta-label">Zu PRÜF</span><span class="cta-sublabel">Über die Aktion</span></a>
+      <a href="https://verein.innn.it/spendenaktion/" class="btn cta-spenden" target="_blank" rel="noopener noreferrer"><span class="cta-label">Spenden</span><span class="cta-sublabel">Aktion unterstützen</span></a>
+      <a href="https://pruef-stand.de/" class="btn cta-stand" target="_blank" rel="noopener noreferrer"><span class="cta-label">PRÜF-Stand</span><span class="cta-sublabel">Aktuelle Verhältnisse im Bundesrat</span></a>
+    </div>
   </div>
   <div class="actions actions--info">
-    <a href="{{ url_for('main.form') }}" class="btn recheck">Weitere Prüfung veranlassen</a>
+    <a href="{{ url_for('main.form') }}" class="btn cta-tertiary">Weitere Prüfung veranlassen</a>
   </div>
 {% endblock %}
